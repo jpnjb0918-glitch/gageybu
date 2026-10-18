@@ -20,6 +20,20 @@
 
 서명 키가 없는 곳에서 `build-apk.sh`를 돌리면 새 키를 만듭니다. 그 APK는 이미 설치된 앱 위에 덮어 설치되지 않으니, 업데이트용 APK는 원래 키가 있는 곳에서 만드세요.
 
+## GitHub Actions 로 APK 만들기 (`.github/workflows/android-apk.yml`)
+
+| 언제 | 결과 |
+|---|---|
+| `main`에 `gagyebu-android/` 변경을 올릴 때, 또는 Actions 화면에서 **Run workflow** | 그 실행 화면의 **Artifacts**에 APK |
+| `android-v<버전>` 릴리스를 **Publish** 할 때 | 그 릴리스에 APK와 설치·사용 가이드가 붙음 |
+
+- **필요한 저장소 시크릿**: `ANDROID_KEYSTORE_BASE64`(서명 키를 base64로 바꾼 한 줄), `ANDROID_KEYSTORE_PASSWORD`(키 암호 첫 줄)
+- **멈추는 경우**
+  - 시크릿이 없을 때
+  - 시크릿 값이 틀릴 때
+  - 1.0.0과 다른 키로 서명되었을 때 (인증서 SHA-256 `872f5656…964b`로 비교)
+  - 릴리스 태그가 `versionName`과 다를 때
+
 ## 버전 표시
 
 | 판 | 버전을 정하는 곳 | 태그 |

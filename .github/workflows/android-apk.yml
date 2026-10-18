@@ -1,0 +1,103 @@
+# 안드로이드판 APK 를 GitHub 에서 만들어 서명한다.
+# 필요한 저장소 시크릿 (Settings → Secrets and variables → Actions → Repository secrets):
+#   ANDROID_KEYSTORE_BASE64   : gagyebu-release.jks 를 base64 로 바꾼 한 줄
+#   ANDROID_KEYSTORE_PASSWORD : keystore-password.txt 의 첫 줄
+# 언제 도나:
+#   - main 에 gagyebu-android/ 변경이 올라올 때 → Actions 화면의 Artifacts 에 APK
+#   - Actions 화면에서 Run workflow 를 누를 때 → 위와 같음
+#   - android-v<버전> 릴리스를 Publish 할 때 → 그 릴리스에 APK·가이드를 붙임
+name: 안드로이드 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'gagyebu-android/**'
+      - '.github/workflows/android-apk.yml'
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    # linux-v... 릴리스에는 돌지 않음
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'android-v')
+    runs-on: ubuntu-24.04
+    env:
+      # 1.0.0 APK 서명 인증서의 SHA-256 (공개값). 다른 키로 서명되면 휴대폰에 덮어 설치가 안 되므로 실패시킨다.
+      EXPECTED_CERT_SHA256: 872f5656ad00593f6d589b46c2f0b6dbc237067263b7589a6e7d9c2020ef964b
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 릴리스 태그와 앱 버전이 같은지
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VER="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' gagyebu-android/app/AndroidManifest.xml)"
+          if [ "$TAG" != "android-v$VER" ]; then
+            echo "::error::릴리스 태그 $TAG 와 AndroidManifest.xml 의 versionName $VER 이 다릅니다"
+            exit 1
+          fi
+
+      - name: 도구 설치 (우분투 패키지, 로컬 빌드와 같은 것)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q android-sdk-platform-23 aapt apksigner zipalign dalvik-exchange openjdk-21-jdk-headless
+          echo "/usr/lib/jvm/java-21-openjdk-amd64/bin" >> "$GITHUB_PATH"
+
+      - name: 서명 키 꺼내기 (시크릿)
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_PW" ]; then
+            echo "::error::시크릿 ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD 를 먼저 넣어 주세요. (없으면 새 키로 서명되어 업데이트가 안 되므로 멈춥니다)"
+            exit 1
+          fi
+          mkdir -p gagyebu-android/packaging
+          printf '%s' "$KS_B64" | tr -d ' \r\n' | base64 -d > gagyebu-android/packaging/gagyebu-release.jks
+          PW="$(printf '%s' "$KS_PW" | tr -d '\r\n')"
+          printf '%s\n' "$PW" > gagyebu-android/packaging/keystore-password.txt
+          export PW
+          if ! keytool -list -keystore gagyebu-android/packaging/gagyebu-release.jks -storepass:env PW -alias gagyebu >/dev/null; then
+            echo "::error::서명 키가 열리지 않습니다. 두 시크릿 값이 맞는지 확인해 주세요."
+            exit 1
+          fi
+
+      - name: APK 만들기
+        run: bash gagyebu-android/build-apk.sh
+
+      - name: 휴대폰에 깔린 앱과 같은 키로 서명됐는지
+        run: |
+          APK="$(ls gagyebu-android/dist/*.apk)"
+          cp "$APK" "$RUNNER_TEMP/check.apk"
+          GOT="$(apksigner verify --print-certs "$RUNNER_TEMP/check.apk" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n1)"
+          echo "서명 인증서 SHA-256: $GOT"
+          if [ "$GOT" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::다른 키로 서명되었습니다 (기대값 $EXPECTED_CERT_SHA256)"
+            exit 1
+          fi
+
+      - name: 서명 키 지우기
+        if: always()
+        run: rm -rf gagyebu-android/packaging
+
+      - name: APK 보관 (Actions 화면의 Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: gagyebu-android-apk
+          path: gagyebu-android/dist/*.apk
+          if-no-files-found: error
+
+      - name: 릴리스에 APK·가이드 붙이기
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" gagyebu-android/dist/*.apk "gagyebu-android/안드로이드_설치·사용가이드.md" \
+            --clobber -R "$GITHUB_REPOSITORY"

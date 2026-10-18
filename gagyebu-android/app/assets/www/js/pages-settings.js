@@ -1,0 +1,301 @@
+/* 설정: 장부·계정과목·품목·암호·백업·CSV·화면 꾸미기·앱 정보 */
+'use strict';
+Pages.settings = (() => {
+  const STICKERS = [];
+  for (let i = 1; i <= 22; i++) STICKERS.push('a' + U.pad(i));
+  for (let i = 1; i <= 40; i++) STICKERS.push('b' + U.pad(i));
+
+  function render(c, p) {
+    const sec = (title, html) => `<div class="section-t">${title}</div><div class="box">${html}</div>`;
+    const hasPw = !!DB.getMeta('password');
+    c.appendChild(UI.el(`<div>
+      ${sec('장부·계정', `<div class="row wrap"><button class="btn sm" data-a="ledgers">장부 관리</button><button class="btn sm" data-a="codes">계정과목</button>
+        <button class="btn sm" data-a="items">품목 자동완성</button><button class="btn sm" data-a="settle">결산일 ${Rep.settleDay()}일</button></div>`)}
+      ${sec('백업 · 복원 (PC와 주고받기)', `<div class="small muted" style="margin-bottom:6px">PC판과 같은 형식의 자료 파일(.sqlite3)을 그대로 주고받습니다.</div>
+        <div class="row wrap"><button class="btn sm pri" data-a="export">파일로 내보내기</button><button class="btn sm" data-a="import">파일에서 가져오기</button>
+        <button class="btn sm" data-a="kept">앱 안 보관본</button></div>`)}
+      ${sec('CSV (엑셀)', `<div class="row wrap"><button class="btn sm" data-a="csvout">내역 CSV로 저장</button><button class="btn sm" data-a="csvin">CSV 내역 불러오기</button></div>
+        <div class="small muted" style="margin-top:6px">불러오기 형식: 날짜, 품목, 수입, 지출, 계정코드[, 계정과목, 메모]</div>`)}
+      ${sec('시작 암호', `<div class="small" style="margin-bottom:6px">${hasPw ? '암호가 설정되어 있습니다.' : '암호가 없습니다.'}</div>
+        <div class="row wrap"><button class="btn sm" data-a="pw">${hasPw ? '암호 변경' : '암호 설정'}</button>${hasPw ? '<button class="btn sm" data-a="pwoff">암호 해제</button>' : ''}</div>`)}
+      <div id="deco"></div>
+      ${sec('화면 꾸미기', decoHtml())}
+      ${sec('앱 정보', infoHtml())}
+    </div>`));
+    const act = {
+      ledgers: ledgerSheet, codes: () => App.go('codes', {}, true), items: itemSheet, settle: settleSheet,
+      export: exportDb, import: importDb, kept: keptSheet, csvout: csvOut, csvin: csvIn, pw: pwSheet, pwoff: pwOff,
+    };
+    UI.on(c, '[data-a]', 'click', (e, b) => act[b.dataset.a]());
+    bindDeco(c);
+    if (p && p.section === 'deco') setTimeout(() => UI.$('#deco').scrollIntoView(), 50);
+  }
+
+  // ── 장부 관리 ──
+  function ledgerSheet() {
+    const ls = L.ledgers();
+    const first = L.firstLedgerId();
+    const body = UI.el(`<div><ul class="list">${ls.map(l => `<li><div class="grow"><div class="main-t">${U.esc(l.name)}${l.id === App.lid ? ' <span class="chip on">지금 장부</span>' : ''}</div>
+      <div class="sub">내역 ${DB.val('SELECT COUNT(*) AS v FROM entry WHERE ledger_id=?', [l.id])}건</div></div>
+      <button class="btn sm" data-r="${l.id}">이름</button><button class="btn sm" data-z="${l.id}">비우기</button>${l.id === first ? '' : `<button class="btn sm danger" data-d="${l.id}">삭제</button>`}</li>`).join('')}</ul></div>`);
+    const sh = UI.sheet({ title: '장부 관리', body, full: true, buttons: [{ label: '새 장부', cls: 'pri', onClick: () => { setTimeout(newLedger, 0); } }] });
+    const name = id => ls.find(l => l.id === id).name;
+    UI.on(body, '[data-r]', 'click', (e, b) => {
+      const id = Number(b.dataset.r);
+      UI.formSheet({ title: '장부 이름 바꾸기', fields: [{ k: 'name', label: '장부 이름', type: 'text', req: true }], values: { name: name(id) },
+        onSave: v => { L.renameLedger(id, v.name); App.reloadLedgers(); App.dataChanged(); sh.close(); } });
+    });
+    UI.on(body, '[data-z]', 'click', (e, b) => {
+      const id = Number(b.dataset.z);
+      UI.confirm(`'${name(id)}'의 내역·예산·예약을 모두 지울까요?\n(계정과목은 남습니다. 되돌릴 수 없으니 먼저 파일로 내보내 두세요)`, '모두 지우기', true).then(ok => {
+        if (ok) { L.resetLedger(id); sh.close(); App.dataChanged(); UI.toast('장부를 비웠습니다'); }
+      });
+    });
+    UI.on(body, '[data-d]', 'click', (e, b) => {
+      const id = Number(b.dataset.d);
+      UI.confirm(`장부 '${name(id)}'과(와) 그 안의 모든 자료를 삭제할까요?`, '삭제', true).then(ok => {
+        if (!ok) return;
+        try { L.deleteLedger(id); } catch (err) { UI.alert(err.message); return; }
+        sh.close(); App.reloadLedgers(); App.selectLedger(id === App.lid ? L.firstLedgerId() : App.lid);
+      });
+    });
+  }
+  function newLedger() {
+    UI.formSheet({ title: '새 장부', fields: [{ k: 'name', label: '장부 이름', type: 'text', req: true },
+      { k: 'how', label: '만드는 방법', type: 'select', options: [['empty', '빈 장부 (대분류 수입만)'], ['codes', `지금 장부(${App.ledgerName()})의 계정과목만 복사`], ['all', '지금 장부를 통째로 복사']] }],
+    values: { how: 'codes' },
+    onSave: v => {
+      const lid = L.addLedger(v.name, v.how === 'empty' ? null : App.lid, v.how === 'codes');
+      App.selectLedger(lid);
+      UI.toast('새 장부를 만들었습니다');
+    } });
+  }
+
+  // ── 품목 자동완성 ──
+  function itemSheet() {
+    const lid = App.lid;
+    const min = parseInt(DB.getMeta('item_min_count', 1) || 1, 10) || 1;
+    const words = L.itemWords(lid, 1);
+    const body = UI.el(`<div><div class="form"><div class="f"><label class="l">자동완성에 보일 최소 사용 횟수</label><input type="number" data-k="min" value="${min}"></div></div>
+      <ul class="list">${words.slice(0, 300).map(w => `<li><div class="grow">${U.esc(w.name)}</div><span class="muted small">${w.count}회</span><button class="btn sm danger" data-w="${U.esc(w.name)}">삭제</button></li>`).join('')}</ul></div>`);
+    UI.on(body, '[data-w]', 'click', (e, b) => { L.deleteItemWord(lid, b.dataset.w); b.closest('li').remove(); });
+    UI.sheet({ title: '품목 자동완성', body, full: true, buttons: [{ label: '저장', cls: 'pri', onClick: (cl, sb) => {
+      const n = parseInt(UI.$('[data-k=min]', sb).value, 10);
+      if (!n || n < 1) { UI.toast('1 이상으로 입력하세요'); return false; }
+      DB.setMeta('item_min_count', n);
+      return undefined;
+    } }] });
+  }
+  function settleSheet() {
+    UI.formSheet({ title: '결산일', fields: [{ k: 'sd', label: '결산일 (1~31)', type: 'int', hint: '5일이면 5일~다음달 4일을 한 달로 셉니다' }], values: { sd: Rep.settleDay() },
+      onSave: v => { if (!v.sd || v.sd < 1 || v.sd > 31) throw new Error('1~31 사이로 입력하세요.'); DB.setMeta('settle_day', v.sd); App.dataChanged(); } });
+  }
+
+  // ── 백업 · 복원 ──
+  function exportDb() {
+    const name = `gagyebu-${U.today().replace(/-/g, '')}.sqlite3`;
+    App.nativeAsync('exportDb', name).then(r => {
+      if (r.ok) UI.alert(`자료 파일을 저장했습니다 (${Math.round(r.size / 1024)}KB).\n\nPC로 옮긴 뒤 PC판 설정 → 암호 · 백업 → '백업 파일로 복원하기…'로 열면 됩니다.`);
+      else if (!r.cancel) UI.alert('저장하지 못했습니다.\n' + r.error);
+    });
+  }
+  function importDb() {
+    UI.confirm('지금 휴대폰의 자료를 고른 백업 파일 내용으로 바꿉니다.\n지금 자료는 앱 안에 보관해 두니 \'앱 안 보관본\'에서 되돌릴 수 있습니다.\n\n계속할까요?', '파일 고르기').then(ok => {
+      if (!ok) return;
+      App.nativeAsync('importDb').then(r => {
+        if (r.ok) { App.afterReplace(); UI.alert('자료를 가져왔습니다.' + (r.kept ? `\n이전 자료 보관: ${r.kept}` : '')); }
+        else if (!r.cancel) UI.alert('가져오지 못했습니다.\n' + r.error + '\n\n지금 자료는 그대로입니다.');
+      });
+    });
+  }
+  function keptSheet() {
+    let items = [];
+    try { const o = JSON.parse(App.native.listBackups()); items = o.items || []; } catch (_) { /* 없음 */ }
+    items.sort((a, b) => b.mtime - a.mtime);
+    const label = k => (k === 'autobackup' ? '자동 보관 (하루 한 번)' : k === 'corrupt' ? '손상되어 옮겨 둔 파일' : '가져오기 전 자료');
+    const body = UI.el(`<div><div class="small muted" style="margin-bottom:6px">앱을 지우면 이 보관본도 함께 지워집니다. 오래 보관하려면 '파일로 내보내기'를 쓰세요.</div>
+      ${items.length ? `<ul class="list">${items.map((x, i) => `<li class="tap" data-i="${i}"><div class="grow"><div class="main-t">${U.esc(x.name)}</div>
+      <div class="sub">${label(x.kind)} · ${Math.round(x.size / 1024)}KB</div></div><span class="chip">되돌리기</span></li>`).join('')}</ul>` : UI.empty('보관본이 없어요')}</div>`);
+    const sh = UI.sheet({ title: '앱 안 보관본', body, full: true });
+    UI.on(body, '[data-i]', 'click', (e, li) => {
+      const x = items[Number(li.dataset.i)];
+      UI.confirm(`'${x.name}' 내용으로 자료를 바꿀까요?\n(지금 자료도 보관해 둡니다)`, '되돌리기', true).then(ok => {
+        if (!ok) return;
+        const r = JSON.parse(App.native.restoreBackup(x.kind, x.name));
+        if (!r.ok) { UI.alert('되돌리지 못했습니다.\n' + r.error); return; }
+        sh.close();
+        App.afterReplace();
+        UI.toast('되돌렸습니다');
+      });
+    });
+  }
+
+  // ── CSV ──
+  function csvOut() {
+    const lid = App.lid;
+    const cmap = L.categoryMap(lid);
+    const rows = DB.q('SELECT * FROM entry WHERE ledger_id=? ORDER BY date, id', [lid]);
+    const csv = Bk.toCsv(Bk.CSV_HEADER, rows.map(r => [r.date, r.item, r.income, r.expense, r.code, L.codeLabel(cmap, r.code), r.memo]));
+    App.nativeAsync('saveText', `${App.ledgerName()}_내역.csv`, 'text/csv', csv).then(r => {
+      if (r.ok) UI.toast(`${rows.length}건을 저장했습니다`); else if (!r.cancel) UI.alert('저장하지 못했습니다.\n' + r.error);
+    });
+  }
+  function csvIn() {
+    App.nativeAsync('openText').then(r => {
+      if (!r.ok) { if (!r.cancel) UI.alert('파일을 읽지 못했습니다.\n' + r.error); return; }
+      const lid = App.lid;
+      const valid = new Set(L.categories(lid).map(x => x.code));
+      const [rows, errors] = Bk.readEntriesCsv(r.text, valid);
+      const body = `<div><div>정상 ${rows.length}건${errors.length ? `, <span class="out">오류 ${errors.length}건</span>` : ''}</div>
+        ${errors.length ? `<ul class="list small">${errors.slice(0, 50).map(([n, m]) => `<li>${n}행: ${U.esc(m)}</li>`).join('')}</ul>` : ''}
+        <div class="small muted" style="margin-top:6px">정상인 행만 '${U.esc(App.ledgerName())}' 장부에 넣습니다.</div></div>`;
+      UI.sheet({ title: 'CSV 내역 불러오기', body, full: errors.length > 5, buttons: [{ label: '취소' }, { label: `${rows.length}건 넣기`, cls: 'pri', onClick: () => {
+        if (!rows.length) return undefined;
+        DB.tx(() => rows.forEach(x => L.addEntry(lid, x, 'csv')));
+        App.dataChanged();
+        UI.toast(`${rows.length}건을 넣었습니다`);
+        return undefined;
+      } }] });
+    });
+  }
+
+  // ── 암호 (PC판과 같은 방식이라 백업 파일을 옮겨도 같은 암호) ──
+  function pwSheet() {
+    const has = !!DB.getMeta('password');
+    const fields = (has ? [{ k: 'cur', label: '지금 암호', type: 'password', req: true }] : [])
+      .concat([{ k: 'pw1', label: '새 암호', type: 'password', req: true }, { k: 'pw2', label: '새 암호 한 번 더', type: 'password', req: true }]);
+    UI.formSheet({ title: has ? '암호 변경' : '암호 설정', fields,
+      extra: '<div class="small muted">암호를 잊으면 앱 데이터를 지워야 합니다 (PC판에서 암호를 지운 백업 파일로 다시 옮길 수는 있음).</div>',
+      onSave: v => {
+        if (has && !Bk.checkPassword(v.cur, DB.getMeta('password'))) throw new Error('지금 암호가 틀렸습니다.');
+        if (v.pw1 !== v.pw2) throw new Error('새 암호 두 칸이 다릅니다.');
+        DB.setMeta('password', Bk.hashPassword(v.pw1));
+        App.dataChanged();
+        UI.toast('암호를 저장했습니다');
+      } });
+  }
+  function pwOff() {
+    UI.formSheet({ title: '암호 해제', fields: [{ k: 'cur', label: '지금 암호', type: 'password', req: true }],
+      onSave: v => {
+        if (!Bk.checkPassword(v.cur, DB.getMeta('password'))) throw new Error('암호가 틀렸습니다.');
+        DB.run("DELETE FROM meta WHERE key='password'");
+        App.dataChanged();
+        UI.toast('암호를 해제했습니다');
+      } });
+  }
+
+  // ── 화면 꾸미기 (이 휴대폰에만 저장) ──
+  function decoHtml() {
+    return `<div class="form">
+      <div class="f"><label class="l">테마</label><select data-p="theme"><option value="retro">미니홈피 (2000년대 감성)</option><option value="basic">기본 (깔끔하게)</option></select></div>
+      <div class="f"><label class="l">글꼴</label><select data-p="font"><option value="pixel">도트 글꼴 (갈무리)</option><option value="system">휴대폰 기본 글꼴</option></select></div>
+      <div class="f"><label class="l">글자 크기</label><select data-p="fontsize"><option value="s">작게</option><option value="m">보통</option><option value="l">크게</option><option value="xl">아주 크게</option></select></div>
+      <label class="check"><input type="checkbox" data-p="marquee"> 전광판 (맨 위 흐르는 글자)</label>
+      <div class="f"><label class="l">오늘의 기분</label><select data-p="mood">${App.MOODS.map(m => `<option>${U.esc(m)}</option>`).join('')}</select></div>
+      <div class="f"><label class="l">한마디 (전광판에 나옴)</label><input type="text" data-p="motto" placeholder="오늘도 알뜰살뜰 (^-^)v"></div>
+      <div class="f"><label class="l">미니미 (맨 위 그림)</label><div class="stickers">${STICKERS.map(s => `<button data-st="${s}"><img src="${UI.sticker(s)}" alt="" loading="lazy"></button>`).join('')}</div></div></div>`;
+  }
+  function bindDeco(c) {
+    UI.$$('[data-p]', c).forEach(x => {
+      const k = x.dataset.p;
+      if (x.type === 'checkbox') x.checked = App.pref(k) === 'true'; else x.value = App.pref(k) || '';
+      x.addEventListener('change', () => {
+        App.setPref(k, x.type === 'checkbox' ? String(x.checked) : x.value);
+        App.applyTheme();
+        App.updateHeader();
+      });
+    });
+    const cur = App.pref('minimi');
+    UI.$$('[data-st]', c).forEach(b => b.classList.toggle('on', b.dataset.st === cur));
+    UI.on(c, '[data-st]', 'click', (e, b) => {
+      App.setPref('minimi', b.dataset.st);
+      UI.$$('[data-st]', c).forEach(x => x.classList.toggle('on', x === b));
+      App.updateHeader();
+    });
+  }
+  function infoHtml() {
+    let info = {};
+    try { info = JSON.parse(App.native.appInfo()); } catch (_) { /* 없음 */ }
+    return `<div class="small" style="line-height:1.7">우리집 가계부 (안드로이드판) ${U.esc(info.version || '')}<br>
+      자료 파일 크기: ${info.dbSize ? Math.round(info.dbSize / 1024) + 'KB' : '-'}<br>
+      <span class="muted">글꼴: 갈무리(Galmuri) — SIL Open Font License 1.1 · 음력 계산: korean-lunar-calendar — MIT License<br>
+      고양이 스티커: 사용자가 제공한 스티커 시트에서 오려 낸 그림 (개인 사용)</span></div>`;
+  }
+  return { title: '설정', sticker: 'b08', sub: '내 맘대로 꾸미기', render, tab: 'more' };
+})();
+
+// ════════ 계정과목 편집 ════════
+Pages.codes = (() => {
+  function render(c) {
+    const lid = App.lid;
+    c.appendChild(UI.el(`<div class="small muted" style="margin-bottom:6px">'${U.esc(App.ledgerName())}' 장부의 계정과목입니다. 계정코드 첫 글자가 대분류이고, 0으로 시작하면 수입입니다.</div>`));
+    const gs = L.groups(lid), cats = L.categories(lid);
+    let html = '';
+    for (const g of gs) {
+      html += `<div class="dayhead tap" data-g="${U.esc(g.code)}"><span>(${U.esc(g.code)}) ${U.esc(g.name)}</span><span class="sums">대분류 편집 ›</span></div><ul class="list">`;
+      html += cats.filter(x => x.code.slice(0, 1) === g.code).map(x => `<li class="tap" data-c="${U.esc(x.code)}"><span class="chip">${U.esc(x.code)}</span><div class="grow">${U.esc(x.name)}</div></li>`).join('');
+      html += `<li class="tap muted" data-add="${U.esc(g.code)}">＋ 소분류 추가</li></ul>`;
+    }
+    c.appendChild(UI.el(`<div>${html}</div>`));
+    UI.on(c, '[data-g]', 'click', (e, x) => groupSheet(x.dataset.g));
+    UI.on(c, '[data-c]', 'click', (e, x) => catSheet(x.dataset.c));
+    UI.on(c, '[data-add]', 'click', (e, x) => addCat(x.dataset.add));
+    App.fab(addGroup, '대분류 추가');
+  }
+  function addGroup() {
+    const lid = App.lid;
+    const used = new Set(L.groups(lid).map(g => g.code));
+    const free = U.CODE_CHARS.split('').filter(ch => !used.has(ch));
+    if (!free.length) { UI.alert('더 만들 수 있는 대분류 코드가 없습니다.'); return; }
+    UI.formSheet({ title: '대분류 추가', fields: [{ k: 'code', label: '대분류 코드', type: 'select', options: free.map(f => [f, f === '0' ? '0 (수입)' : f]) },
+      { k: 'name', label: '이름', type: 'text', req: true }],
+    onSave: v => { L.setGroup(lid, v.code, v.name); App.dataChanged(); } });
+  }
+  function groupSheet(code) {
+    const lid = App.lid;
+    const g = L.groups(lid).find(x => x.code === code);
+    UI.formSheet({ title: `대분류 (${code})`, fields: [{ k: 'name', label: '이름', type: 'text', req: true, hint: code === '0' ? '0번(수입) 대분류 이름은 바꿀 수 없습니다' : '' }],
+      values: { name: g.name },
+      onSave: v => { L.setGroup(lid, code, v.name); App.dataChanged(); },
+      onDelete: code === '0' ? null : close => UI.confirm(`대분류 (${code}) ${g.name}을(를) 삭제할까요?`, '삭제', true).then(ok => {
+        if (!ok) return;
+        try { L.deleteGroup(lid, code); close(); App.dataChanged(); } catch (err) { UI.alert(err.message); }
+      }) });
+  }
+  function addCat(g) {
+    const lid = App.lid;
+    const used = new Set(L.categories(lid).map(x => x.code));
+    const free = U.CODE_CHARS.split('').map(ch => g + ch).filter(c => !used.has(c));
+    if (!free.length) { UI.alert('이 대분류에는 더 만들 수 있는 코드가 없습니다.'); return; }
+    UI.formSheet({ title: '소분류 추가', fields: [{ k: 'code', label: '계정코드', type: 'select', options: free.map(f => [f, f]) }, { k: 'name', label: '이름', type: 'text', req: true }],
+      onSave: v => { L.setCategory(lid, v.code, v.name); App.dataChanged(); } });
+  }
+  function catSheet(code) {
+    const lid = App.lid;
+    const x = L.categories(lid).find(c => c.code === code);
+    const use = L.categoryUsage(lid, code);
+    const others = L.categories(lid).filter(c => c.code !== code);
+    UI.formSheet({ title: `계정과목 ${code}`, fields: [{ k: 'name', label: '이름', type: 'text', req: true }], values: { name: x.name },
+      extra: `<div><div class="small muted">사용: 내역 ${use.entry}건 · 예약 ${use.recurring}건 · 예산 ${use.budget}건</div>
+        <div class="row wrap" style="margin-top:8px"><button class="btn sm" data-up>위로</button><button class="btn sm" data-dn>아래로</button></div>
+        <div class="section-t">다른 계정으로 합치기</div><div class="row"><select class="inp grow" data-to>${others.map(o => `<option value="${U.esc(o.code)}">${U.esc(o.code)} ${U.esc(o.name)}</option>`).join('')}</select><button class="btn sm" data-merge>합치기</button></div>
+        <div class="small muted">이 계정의 내역·예약·예산을 고른 계정으로 옮기고 이 계정은 지웁니다.</div></div>`,
+      afterOpen: sb => {
+        UI.$('[data-up]', sb).onclick = () => { L.moveCategoryOrder(lid, code, -1); App.dataChanged(); UI.toast('순서를 바꿨습니다'); };
+        UI.$('[data-dn]', sb).onclick = () => { L.moveCategoryOrder(lid, code, 1); App.dataChanged(); UI.toast('순서를 바꿨습니다'); };
+        UI.$('[data-merge]', sb).onclick = () => {
+          const to = UI.$('[data-to]', sb).value;
+          if (!to) return;
+          UI.confirm(`${code} ${x.name} → ${to} 로 합칠까요?`, '합치기', true).then(ok => {
+            if (!ok) return;
+            try { L.mergeCategory(lid, code, to); UI.closeTop(); App.dataChanged(); UI.toast('합쳤습니다'); } catch (err) { UI.alert(err.message); }
+          });
+        };
+      },
+      onSave: v => { L.setCategory(lid, code, v.name); App.dataChanged(); },
+      onDelete: close => UI.confirm(`계정 ${code} ${x.name}을(를) 삭제할까요?\n이 계정으로 입력한 내역 ${use.entry}건·예약 ${use.recurring}건·예산 ${use.budget}건도 함께 지워집니다.\n(내역을 남기려면 '다른 계정으로 합치기'를 쓰세요)`, '삭제', true).then(ok => {
+        if (ok) { L.deleteCategory(lid, code); close(); App.dataChanged(); }
+      }) });
+  }
+  return { title: '계정과목', sticker: 'b08', sub: '대분류·소분류 편집', render, tab: 'more' };
+})();

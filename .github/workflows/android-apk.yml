@@ -30,7 +30,7 @@ jobs:
       # 1.0.0 APK 서명 인증서의 SHA-256 (공개값). 다른 키로 서명되면 휴대폰에 덮어 설치가 안 되므로 실패시킨다.
       EXPECTED_CERT_SHA256: 872f5656ad00593f6d589b46c2f0b6dbc237067263b7589a6e7d9c2020ef964b
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 릴리스 태그와 앱 버전이 같은지
         if: github.event_name == 'release'
@@ -87,7 +87,7 @@ jobs:
         run: rm -rf gagyebu-android/packaging
 
       - name: APK 보관 (Actions 화면의 Artifacts)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gagyebu-android-apk
           path: gagyebu-android/dist/*.apk

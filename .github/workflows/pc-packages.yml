@@ -93,7 +93,7 @@ jobs:
           fi
           sudo apt-get update -q
           sudo apt-get install -y -q mingw-w64 win-iconv-mingw-w64-dev nsis zip python3-pil \
-               autoconf automake libtool bison flex pkg-config dpkg-dev
+               autoconf automake libtool gettext bison flex pkg-config dpkg-dev
 
       - name: 임베디드 파이썬 받기 (SHA-256 확인)
         run: |

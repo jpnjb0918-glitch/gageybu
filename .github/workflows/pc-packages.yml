@@ -136,7 +136,7 @@ jobs:
           A="$RUNNER_TEMP/art"
           cp gagyebu-linux/사용가이드.txt "$RUNNER_TEMP/gagyebu-pc-guide-$VER.txt"
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | while IFS= read -r n; do
-            [ -n "$n" ] && gh release delete-asset "$TAG" "$n" -y -R "$GITHUB_REPOSITORY"
+            [ -n "$n" ] && gh release delete-asset -y -R "$GITHUB_REPOSITORY" -- "$TAG" "$n"
           done
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber \
             "$A/pc-windows/gagyebu-windows-$VER-setup.exe#윈도우판 $VER 설치 프로그램 (setup.exe)" \

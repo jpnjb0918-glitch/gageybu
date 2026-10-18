@@ -110,7 +110,7 @@ jobs:
           cp gagyebu-android/dist/*.apk "$RUNNER_TEMP/gagyebu-android-$VER.apk"
           cp "gagyebu-android/안드로이드_설치·사용가이드.md" "$RUNNER_TEMP/gagyebu-android-guide-$VER.md"
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | while IFS= read -r n; do
-            [ -n "$n" ] && gh release delete-asset "$TAG" "$n" -y -R "$GITHUB_REPOSITORY"
+            [ -n "$n" ] && gh release delete-asset -y -R "$GITHUB_REPOSITORY" -- "$TAG" "$n"
           done
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber \
             "$RUNNER_TEMP/gagyebu-android-$VER.apk#안드로이드판 $VER (APK)" \

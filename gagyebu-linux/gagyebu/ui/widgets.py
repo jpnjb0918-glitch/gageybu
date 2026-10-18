@@ -23,6 +23,13 @@ FOOTER_BG = QColor('#ece8f6')
 ID_ROLE = Qt.ItemDataRole.UserRole
 
 
+def retheme(t):
+    """테마가 바뀌면 표 글자·배경색을 그 자리에서 바꿈 (다른 모듈이 가져다 쓴 같은 QColor 객체도 함께 바뀜).
+    t: theme.tone() 의 결과"""
+    for obj, key in ((INCOME_COLOR, 'in'), (EXPENSE_COLOR, 'out'), (SUBTOTAL_BG, 'subtotal_bg'), (FOOTER_BG, 'footer_bg')):
+        obj.setRgba(QColor(t[key]).rgba())
+
+
 # ── 입력 위젯 ───────────────────────────────────────────
 class MoneyEdit(QLineEdit):
     def __init__(self, parent=None):
@@ -428,17 +435,40 @@ class CodePicker(QDialog):
         return out
 
 
+class ClickLabel(QLabel):
+    """누를 수 있는 글자 (스타일시트의 QLabel#이름 은 그대로 적용됨). Tab 으로 옮겨 와 Enter·Space 로도 누름"""
+    clicked = pyqtSignal()
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton and self.rect().contains(ev.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(ev)
+
+    def keyPressEvent(self, ev):
+        if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(ev)
+
+
 class MonthNav(QWidget):
-    """◀ 2026년 10월 ▶ [이번 달]"""
+    """◀ 2026년 10월 ▾ ▶ [이번 달] — 가운데 글자를 누르면 연·월을 바로 고르는 창"""
     changed = pyqtSignal(int, int)
 
     def __init__(self, parent=None, y=None, m=None):
         super().__init__(parent)
         t = dt.date.today()
         self.y, self.m = y or t.year, m or t.month
-        self.lbl = QLabel()
+        self.lbl = ClickLabel()
         self.lbl.setObjectName('MonthLabel')      # 글꼴·크기는 테마 스타일시트에서 (theme.py)
         self.lbl.setAlignment(CENTER)
+        self.lbl.setToolTip('눌러서 연·월을 바로 고르기')
+        self.lbl.clicked.connect(self.pick)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         for txt, d in (('◀', -1), (None, 0), ('▶', 1)):
@@ -447,6 +477,7 @@ class MonthNav(QWidget):
             else:
                 b = QPushButton(txt)
                 b.setFixedWidth(34)
+                b.setToolTip('앞 달' if d < 0 else '다음 달')
                 b.clicked.connect(lambda _=False, d=d: self.shift(d))
                 lay.addWidget(b)
         lay.addWidget(button('이번 달', self.this_month))
@@ -466,7 +497,215 @@ class MonthNav(QWidget):
         self.y, self.m = y, m
         self._upd(True)
 
+    def pick(self):
+        r = pick_month(self, self.y, self.m, anchor=self.lbl)
+        if r:
+            self.set(*r)
+
     def _upd(self, emit=False):
-        self.lbl.setText(f'{self.y}년 {self.m}월')
+        self.lbl.setText(f'{self.y}년 {self.m}월<span style="font-size:8pt; color:gray;"> ▼</span>')
         if emit:
             self.changed.emit(self.y, self.m)
+
+
+class MonthPicker(QDialog):
+    """연·월 고르기: 연도(◀▶ 또는 직접 입력) + 1~12월 단추. 달을 누르면 바로 그 달로"""
+    MIN, MAX = 1900, 2100
+
+    def __init__(self, parent, y, m):
+        super().__init__(parent)
+        self.setWindowTitle('연·월 고르기')
+        self.y0, self.m0 = y, m
+        self.result_ym = None
+        t = dt.date.today()
+        self.today = (t.year, t.month)
+        self.year = QSpinBox()
+        self.year.setRange(self.MIN, self.MAX)
+        self.year.setValue(y)
+        self.year.setSuffix('년')
+        self.year.setAlignment(CENTER)
+        self.year.setMinimumWidth(110)
+        self.year.valueChanged.connect(lambda *_: self._marks())
+        prev_b, next_b = QPushButton('◀'), QPushButton('▶')
+        for b_, d in ((prev_b, -1), (next_b, 1)):
+            b_.setFixedWidth(34)
+            b_.setAutoDefault(False)
+            b_.setToolTip('앞 해' if d < 0 else '다음 해')
+            b_.clicked.connect(lambda _=False, d=d: self.year.setValue(self.year.value() + d))
+        top = QHBoxLayout()
+        top.addStretch(1)
+        for w in (prev_b, self.year, next_b):
+            top.addWidget(w)
+        top.addStretch(1)
+        from PyQt6.QtWidgets import QGridLayout
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        self.month_btns = []
+        for i in range(12):
+            b_ = QPushButton(f'{i + 1}월')
+            b_.setObjectName('MonthBtn')
+            b_.setCheckable(True)
+            b_.setAutoDefault(False)
+            b_.setMinimumSize(64, 34)
+            b_.clicked.connect(lambda _=False, mm=i + 1: self.choose(self.year.value(), mm))
+            grid.addWidget(b_, i // 4, i % 4)
+            self.month_btns.append(b_)
+        hint = QLabel('연도는 ◀▶ 로 넘기거나 칸에 바로 쳐서 바꾸고, 달을 누르면 그 달로 갑니다.')
+        hint.setWordWrap(True)
+        hint.setStyleSheet('color: gray;')
+        bot = QHBoxLayout()
+        bot.addWidget(button('이번 달', lambda: self.choose(*self.today)))
+        bot.addStretch(1)
+        close_b = button('닫기', self.reject)
+        bot.addWidget(close_b)
+        # 지금 보고 있는 달: 테마의 강조색 (테마마다 눌린 단추 모양이 달라 따로 정함)
+        self.setStyleSheet('QPushButton#MonthBtn:checked { background: palette(highlight); color: palette(highlighted-text);'
+                           ' border: 2px solid palette(highlight); font-weight: bold; }')
+        lay = QVBoxLayout(self)
+        lay.addLayout(top)
+        lay.addLayout(grid)
+        lay.addWidget(hint)
+        lay.addLayout(bot)
+        self._marks()
+
+    def _marks(self):
+        """지금 보고 있는 달은 눌린 모양, 오늘이 있는 달은 굵게"""
+        yy = self.year.value()
+        for i, b_ in enumerate(self.month_btns):
+            b_.setChecked(yy == self.y0 and i + 1 == self.m0)
+            f = b_.font()
+            f.setBold((yy, i + 1) == self.today)
+            f.setUnderline((yy, i + 1) == self.today)
+            b_.setFont(f)
+
+    def choose(self, y, m):
+        self.result_ym = (int(y), int(m))
+        self.accept()
+
+
+def pick_month(parent, y, m, anchor=None):
+    """연·월 고르기 창 → (연, 월) 또는 None"""
+    dlg = MonthPicker(parent, y, m)
+    if anchor is not None:
+        from PyQt6.QtCore import QPoint
+        dlg.adjustSize()
+        pt = anchor.mapToGlobal(QPoint(anchor.width() // 2 - dlg.width() // 2, anchor.height() + 4))
+        dlg.move(pt)
+    run_dialog(dlg)
+    return dlg.result_ym
+
+
+# ── 순서 바꾸기 창 ─────────────────────────────────────
+class ReorderDialog(QDialog):
+    """끌어다 놓기 또는 단추로 순서를 바꾸는 창.
+    items: [(key, 이름, 둘째 줄)] · sub_for(i, key): 옮길 때마다 둘째 줄 다시 쓰기 · reset_label 이 있으면 '기본 순서' 단추.
+    exec() 뒤 self.result_keys (저장) 또는 self.reset (기본 순서로) 를 봄."""
+
+    def __init__(self, parent, title, items, hint='', reset_label=None, sub_for=None):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout
+        self.setWindowTitle(title)
+        self.result_keys, self.reset, self.sub_for = None, False, sub_for
+        self.items = {str(k): (label, sub) for k, label, sub in items}
+        self.list = QListWidget()
+        self.list.setObjectName('ReorderList')
+        self.list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.list.setAlternatingRowColors(True)
+        self.list.setStyleSheet('QListWidget#ReorderList::item { padding: 7px 4px; }')
+        for k, label, sub in items:
+            it = QListWidgetItem()
+            it.setData(Qt.ItemDataRole.UserRole, str(k))
+            self.list.addItem(it)
+        self.list.model().rowsMoved.connect(lambda *_: self._relabel())
+        self._relabel()
+        if self.list.count():
+            self.list.setCurrentRow(0)
+        lay = QVBoxLayout(self)
+        if hint:
+            lab = QLabel(hint)
+            lab.setWordWrap(True)
+            lay.addWidget(lab)
+        tip = QLabel('줄을 끌어다 놓거나, 고른 뒤 오른쪽 단추로 옮기세요.')
+        tip.setStyleSheet('color: gray')
+        lay.addWidget(tip)
+        row = QHBoxLayout()
+        row.addWidget(self.list, 1)
+        side = QVBoxLayout()
+        for text, d in (('맨 위로', -999), ('위로 ▲', -1), ('아래로 ▼', 1), ('맨 아래로', 999)):
+            b = QPushButton(text)
+            b.setAutoDefault(False)                 # Enter = 저장
+            b.clicked.connect(lambda _c=False, d=d: self.move(d))
+            side.addWidget(b)
+        side.addStretch(1)
+        row.addLayout(side)
+        lay.addLayout(row, 1)
+        bb = QDialogButtonBox()
+        if reset_label:
+            rb = bb.addButton(reset_label, QDialogButtonBox.ButtonRole.ResetRole)
+            rb.setAutoDefault(False)
+            rb.clicked.connect(self._reset)
+        ok = bb.addButton('저장', QDialogButtonBox.ButtonRole.AcceptRole)
+        ok.setDefault(True)
+        bb.addButton('취소', QDialogButtonBox.ButtonRole.RejectRole)
+        bb.accepted.connect(self._save)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        self.resize(460, min(640, 160 + 34 * max(4, len(items))))
+
+    def keys(self):
+        return [self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count())]
+
+    def _relabel(self):
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            k = it.data(Qt.ItemDataRole.UserRole)
+            label, sub = self.items[k]
+            if self.sub_for:
+                sub = self.sub_for(i, k)
+            it.setText(f'☰  {label}' + (f'      {sub}' if sub else ''))
+
+    def move(self, d):
+        r = self.list.currentRow()
+        if r < 0:
+            return
+        n = self.list.count()
+        to = 0 if d == -999 else n - 1 if d == 999 else max(0, min(n - 1, r + d))
+        if to == r:
+            return
+        it = self.list.takeItem(r)
+        self.list.insertItem(to, it)
+        self.list.setCurrentRow(to)
+        self._relabel()
+
+    def _save(self):
+        self.result_keys = self.keys()
+        self.accept()
+
+    def _reset(self):
+        self.reset = True
+        self.accept()
+
+
+def run_dialog(dlg):
+    """창 띄우기 (시험에서는 이 함수를 바꿔 끼워 창을 대신 조작)"""
+    return dlg.exec()
+
+
+def ask_order(parent, title, items, hint='', reset_label=None, sub_for=None):
+    """순서 바꾸기 창 → ('save', keys) / ('reset', None) / (None, None)"""
+    dlg = ReorderDialog(parent, title, items, hint, reset_label, sub_for)
+    run_dialog(dlg)
+    if dlg.reset:
+        return 'reset', None
+    if dlg.result_keys is not None:
+        return 'save', dlg.result_keys
+    return None, None
+
+
+def pick_color(parent, initial, title):
+    """색 고르기 창 → '#RRGGBB' 또는 None (시험에서는 바꿔 끼움)"""
+    from PyQt6.QtWidgets import QColorDialog
+    c = QColorDialog.getColor(QColor(initial), parent, title)
+    return c.name().upper() if c.isValid() else None

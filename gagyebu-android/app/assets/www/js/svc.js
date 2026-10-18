@@ -1,6 +1,87 @@
 /* 자료 처리 (PC판 gagyebu/services/*.py 를 그대로 옮김 — 같은 자료에서 같은 결과가 나와야 함) */
 'use strict';
 
+// ════════════════ 사용자가 정한 순서 (services/order.py 와 같은 규칙) ════════════════
+// 자료 파일 호환을 위해 표에 칸을 더하지 않는다.
+//  대분류 → meta 'order_groups:<장부id>', 같은 날 내역 → meta 'order_day:<장부id>' = {날짜: [id...]},
+//  주소록·일기 → meta 'order_list:contact|diary', 소분류·메모 → 원래 있던 sort 칸.
+//  저장된 순서에 있는 것이 먼저 그 순서대로, 새로 생긴 것은 그 뒤에 원래 순서대로.
+const Ord = (() => {
+  const LIST_TABLES = ['contact', 'diary'];
+  function get(key, dflt) {
+    const v = DB.getJson(key, dflt);
+    return (Array.isArray(dflt) ? Array.isArray(v) : (v && typeof v === 'object' && !Array.isArray(v))) ? v : dflt;
+  }
+  function put(key, value) {
+    const empty = Array.isArray(value) ? !value.length : !Object.keys(value).length;
+    DB.setMeta(key, empty ? null : JSON.stringify(value));
+  }
+  function byList(rows, ids, key) {
+    key = key || (r => r.id);
+    if (!ids || !ids.length) return rows.slice();
+    const pos = new Map();
+    ids.forEach((v, i) => { if (!pos.has(v)) pos.set(v, i); });
+    const listed = rows.filter(r => pos.has(key(r))).sort((a, b) => pos.get(key(a)) - pos.get(key(b)));
+    return listed.concat(rows.filter(r => !pos.has(key(r))));
+  }
+  const groupOrder = lid => get(`order_groups:${lid}`, []).map(String);
+  const setGroupOrder = (lid, codes) => put(`order_groups:${lid}`, codes.map(String));
+  function dayOrders(lid) {
+    const d = get(`order_day:${lid}`, {});
+    const out = {};
+    for (const [k, v] of Object.entries(d)) if (Array.isArray(v)) out[k] = v.map(Number).filter(Number.isInteger);
+    return out;
+  }
+  function setDayOrder(lid, date, ids) {
+    const d = get(`order_day:${lid}`, {});
+    ids = ids.map(Number);
+    const sorted = ids.slice().sort((a, b) => a - b);
+    if (ids.every((v, i) => v === sorted[i])) delete d[date]; else d[date] = ids;
+    put(`order_day:${lid}`, d);
+  }
+  /** 날짜순(같은 날 id 순) 행들의 같은 날 안 순서를 바꿈. desc 면 날짜를 최근 것부터
+   *  (순서를 정한 날은 정한 순서 그대로, 안 정한 날은 최근 입력이 위로). 행이 [r, 잔액] 이어도 됨 */
+  function applyDayOrder(rows, orders, desc) {
+    const R = x => (Array.isArray(x) ? x[0] : x);
+    const out = [];
+    let i = 0;
+    while (i < rows.length) {
+      const d = String(R(rows[i]).date);
+      let j = i;
+      while (j < rows.length && String(R(rows[j]).date) === d) j++;
+      let g = rows.slice(i, j).sort((a, b) => R(a).id - R(b).id);
+      if (orders[d]) g = byList(g, orders[d], x => R(x).id);
+      else if (desc) g.reverse();
+      out.push(g);
+      i = j;
+    }
+    if (desc) out.reverse();
+    return out.flat();
+  }
+  function listOrder(table) {
+    if (!LIST_TABLES.includes(table)) throw new Error('bad table');
+    return get(`order_list:${table}`, []).map(Number).filter(Number.isInteger);
+  }
+  function setListOrder(table, ids) {
+    if (!LIST_TABLES.includes(table)) throw new Error('bad table');
+    put(`order_list:${table}`, ids.map(Number));
+  }
+  /** 보이는 일부(그룹·달)만 순서를 바꿀 때: 다른 것은 그대로 두고 이것들을 정한 순서로 뒤에 붙임. reset 이면 이것들만 순서에서 뺌 */
+  function mergeListOrder(table, viewIds, newOrder) {
+    const v = new Set(viewIds.map(Number));
+    setListOrder(table, listOrder(table).filter(x => !v.has(x)).concat(newOrder ? newOrder.map(Number) : []));
+  }
+  const applyListOrder = (table, rows) => byList(rows, listOrder(table));
+  function setCategoryOrder(lid, codes) {
+    DB.tx(() => codes.forEach((c, i) => DB.run('UPDATE category SET sort=? WHERE ledger_id=? AND code=?', [i + 1, lid, c])));
+  }
+  function setMemoOrder(ids) {
+    DB.tx(() => ids.forEach((id, i) => DB.run('UPDATE memo SET sort=? WHERE id=?', [i + 1, id])));
+  }
+  return { byList, groupOrder, setGroupOrder, dayOrders, setDayOrder, applyDayOrder, listOrder, setListOrder,
+    mergeListOrder, applyListOrder, setCategoryOrder, setMemoOrder };
+})();
+
 // ════════════════ 장부·계정과목·내역 (services/ledger.py) ════════════════
 const L = (() => {
   const ledgers = () => DB.q('SELECT * FROM ledger ORDER BY sort, id');
@@ -46,16 +127,21 @@ const L = (() => {
 
   // ── 계정과목 ──
   const ci = c => U.CODE_CHARS.indexOf(c);
+  /** 대분류 (사용자가 정한 순서가 있으면 그 순서, 없으면 코드 순) */
   function groups(lid) {
     const rows = DB.q('SELECT code, name FROM cat_group WHERE ledger_id=?', [lid]);
     const k = r => (r.code.length === 1 && ci(r.code) >= 0 ? ci(r.code) : 99);
-    return rows.sort((a, b) => k(a) - k(b));
+    return Ord.byList(rows.sort((a, b) => k(a) - k(b)), Ord.groupOrder(lid), r => r.code);
   }
+  /** 소분류: 대분류 순서 → sort(사용자가 정한 순서) → 코드 */
   function categories(lid, group) {
     let sql = 'SELECT code, name, sort FROM category WHERE ledger_id=?';
     const args = [lid];
     if (group !== undefined && group !== null) { sql += ' AND substr(code,1,1)=?'; args.push(group); }
-    return DB.q(sql, args).sort((a, b) => (ci(a.code.slice(0, 1)) - ci(b.code.slice(0, 1))) || (a.sort - b.sort) ||
+    const rank = {};
+    groups(lid).forEach((g, i) => { rank[g.code] = i; });
+    const gr = c => (c in rank ? rank[c] : 100 + Math.max(ci(c), 0));
+    return DB.q(sql, args).sort((a, b) => (gr(a.code.slice(0, 1)) - gr(b.code.slice(0, 1))) || (a.sort - b.sort) ||
       (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
   }
   function categoryMap(lid) { const m = {}; for (const r of DB.q('SELECT code,name FROM category WHERE ledger_id=?', [lid])) m[r.code] = r.name; return m; }
@@ -142,7 +228,7 @@ const L = (() => {
     const a = [lid];
     if (start) { sql += ' AND date>=?'; a.push(start); }
     if (end) { sql += ' AND date<=?'; a.push(end); }
-    const rows = DB.q(sql + ' ORDER BY date, id', a);
+    const rows = Ord.applyDayOrder(DB.q(sql + ' ORDER BY date, id', a), Ord.dayOrders(lid));   // 같은 날 안은 사용자가 정한 순서
     let bal = start ? balanceBefore(lid, start) : 0;
     return rows.map(r => { bal += r.income - r.expense; return [r, bal]; });
   }
@@ -180,7 +266,10 @@ const L = (() => {
     }
     const col = { date: 'date', item: 'item', income: 'income', expense: 'expense', code: 'code', memo: 'memo' }[o.order] || 'date';
     const dir = o.desc ? 'DESC' : 'ASC';
-    return DB.q(sql + ` ORDER BY ${col} ${dir}, id ${dir}`, a);
+    const rows = DB.q(sql + ` ORDER BY ${col} ${dir}, id ${dir}`, a);
+    if (col !== 'date') return rows;
+    const asc = rows.slice().sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.id - y.id));
+    return Ord.applyDayOrder(asc, Ord.dayOrders(lid), !!o.desc);
   }
 
   // ── 품목 자동완성 ──

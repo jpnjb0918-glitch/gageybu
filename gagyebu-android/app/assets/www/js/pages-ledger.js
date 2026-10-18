@@ -144,47 +144,122 @@ const Entry = (() => {
 Pages.ledger = (() => {
   const t = U.parts(U.today());
   const s = { y: t[0], m: t[1], all: false, desc: true, limit: 300 };
+  // ── 피드·타임라인 테마용 목록 (기능은 같고 모양만 다름) ──
+  const AV_COLORS = ['#E8833A', '#E0525B', '#9457D6', '#3B7DDD', '#2E9E5B', '#139A9A', '#D24E8E', '#66788F'];
+  function avatar(label) {
+    const s0 = String(label || '');
+    const s1 = /^\(미분류/.test(s0) ? '?' : s0;
+    let h = 0;
+    for (const ch of s1) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    const ini = Array.from(s1.replace(/[\s()[\]·.,_-]/g, ''))[0] || '?';
+    return `<div class="av" style="background:${AV_COLORS[h % AV_COLORS.length]}">${U.esc(ini)}</div>`;
+  }
+  const man = v => (Math.abs(v) >= 10000 ? `${(v / 10000).toFixed(Math.abs(v) >= 100000 ? 0 : 1).replace(/\.0$/, '')}만` : UI.money(v));
+  function snsRow(r, bal, cmap, tl) {
+    const cat = L.codeLabel(cmap, r.code);
+    const amt = [r.income ? `<div class="in bold">+${UI.money(r.income)}</div>` : '', r.expense ? `<div class="out bold">-${UI.money(r.expense)}</div>` : ''].join('');
+    if (tl) {
+      return `<li class="tap tw" data-id="${r.id}">${avatar(cat)}<div class="grow">
+        <div class="l1"><b class="ellipsis">${U.esc(r.item)}</b><span class="meta ellipsis">${U.esc(cat)} · ${U.shortDate(r.date)}</span></div>
+        ${r.memo ? `<div class="l2">${U.esc(r.memo)}</div>` : ''}<div class="l3">잔액 ${UI.money(bal)}</div></div><div class="amt right nowrap">${amt}</div></li>`;
+    }
+    return `<li class="tap fr" data-id="${r.id}">${avatar(cat)}<div class="grow"><div class="main-t ellipsis">${U.esc(r.item)}</div>
+      <div class="sub ellipsis">${[cat, r.memo].filter(Boolean).map(U.esc).join(' · ')}</div></div>
+      <div class="right nowrap">${amt}<div class="tiny muted">잔액 ${UI.money(bal)}</div></div></li>`;
+  }
+  /** 피드 테마 맨 위: 지출이 많은 계정과목 동그라미 (보기만 하는 요약) */
+  function storiesHtml(rows, cmap) {
+    const by = new Map();
+    for (const [r] of rows) if (r.expense) { const k = L.codeLabel(cmap, r.code); by.set(k, (by.get(k) || 0) + r.expense); }
+    const top = [...by].sort((a, b) => b[1] - a[1]).slice(0, 12);
+    if (!top.length) return '';
+    return `<div class="stories-t">${s.all ? '전체 기간' : `${s.m}월`} 지출 많은 순</div><div class="stories">${top.map(([k, v]) =>
+      `<div class="story"><div class="ring">${avatar(k)}</div><div class="nm ellipsis">${U.esc(k)}</div><div class="amt out">${man(v)}</div></div>`).join('')}</div>`;
+  }
+  function dayHtml(theme, d, list, cmap) {
+    const di = U.sum(list.map(([r]) => r.income)), de = U.sum(list.map(([r]) => r.expense));
+    const sums = `${di ? `<span class="in">+${UI.money(di)}</span> ` : ''}${de ? `<span class="out">-${UI.money(de)}</span>` : ''}`;
+    const ord = list.length > 1 ? `<button class="iconbtn dayord" data-d="${d}" aria-label="이 날 내역 순서 바꾸기" title="순서 바꾸기">⇅</button>` : '';
+    if (theme === 'feed') {
+      return `<article class="post"><header class="ph"><div class="ring sm"><img src="${UI.sticker(App.pref('minimi'))}" alt=""></div>
+        <div class="grow"><div class="pt">${U.dateLabel(d)}</div><div class="ps ellipsis">${U.esc(App.ledgerName())} · ${list.length}건</div></div>${ord}</header>
+        <ul class="list">${list.map(([r, b]) => snsRow(r, b, cmap, false)).join('')}</ul>
+        <footer class="pf"><span class="heart">♡</span>${di ? `<span>수입 <b class="in">+${UI.money(di)}</b></span>` : ''}${de ? `<span>지출 <b class="out">-${UI.money(de)}</b></span>` : ''}</footer></article>`;
+    }
+    if (theme === 'timeline' || theme === 'timeline_dark') {
+      return `<div class="tl-day"><span>${U.dateLabel(d)}</span><span class="sums">${sums}${ord}</span></div>
+        <ul class="list tw-list">${list.map(([r, b]) => snsRow(r, b, cmap, true)).join('')}</ul>`;
+    }
+    return `<div class="dayhead"><span>${U.dateLabel(d)}</span><span class="sums">${sums}${ord}</span></div>
+      <ul class="list">${list.map(([r, b]) => Entry.rowHtml(r, b, false, cmap)).join('')}</ul>`;
+  }
+  /** 같은 날 내역 순서 바꾸기 (PC판과 같은 자료 파일에 저장 → PC에서도 같은 순서) */
+  function dayOrderSheet(d) {
+    const lid = App.lid;
+    const cmap = L.categoryMap(lid);
+    const rows = L.entriesWithBalance(lid, d, d).map(([r]) => r);
+    UI.reorder({ title: `${U.dateLabel(d)} 내역 순서`, hint: '같은 날 안에서의 순서입니다. 잔액도 이 순서로 계산됩니다.',
+      items: rows.map(r => ({ key: r.id, label: r.item || '(품목 없음)',
+        sub: [L.codeLabel(cmap, r.code), r.income ? `+${UI.money(r.income)}` : '', r.expense ? `-${UI.money(r.expense)}` : ''].filter(Boolean).join(' · ') })),
+      onSave: keys => { Ord.setDayOrder(lid, d, keys.map(Number)); App.dataChanged(); },
+      onReset: () => { Ord.setDayOrder(lid, d, rows.map(r => r.id).sort((a, b) => a - b)); App.dataChanged(); } });
+  }
+
   function render(c, p, tools) {
     const lid = App.lid;
-    c.appendChild(UI.monthNav(s.y, s.m, (y, m) => { s.y = y; s.m = m; s.all = false; s.limit = 300; App.render(); }));
+    const theme = App.theme();
     const start = U.iso(s.y, s.m, 1), end = U.iso(s.y, s.m, U.monthEnd(s.y, s.m));
-    const [inc, exp] = L.totals(lid, start, end);
-    const bal = L.currentBalance(lid, U.today());
-    c.appendChild(UI.el(`<div class="box"><div class="stats">
-      <div><div class="k">이달 수입</div><div class="v in">${UI.money(inc)}</div></div>
-      <div><div class="k">이달 지출</div><div class="v out">${UI.money(exp)}</div></div>
-      <div><div class="k">차액</div><div class="v ${UI.moneyCls(inc - exp)}">${UI.money(inc - exp)}</div></div></div>
-      <div class="kv small" style="margin-top:6px;border-top:1px dashed var(--line);padding-top:5px"><span>현재 잔액 (오늘까지)</span><b class="${UI.moneyCls(bal)}">${UI.money(bal)}원</b></div></div>`));
-    const opts = UI.el(`<div class="row" style="margin-bottom:4px"><span class="chip ${s.all ? 'on' : ''}" data-o="all">전체 기간</span>
-      <span class="chip ${s.desc ? 'on' : ''}" data-o="desc">최근 것을 위로</span></div>`);
-    UI.on(opts, '.chip', 'click', (e, x) => { s[x.dataset.o] = !s[x.dataset.o]; s.limit = 300; App.render(); });
-    c.appendChild(opts);
     let rows = s.all ? L.entriesWithBalance(lid) : L.entriesWithBalance(lid, start, end);
-    if (s.desc) rows = rows.slice().reverse();
+    if (s.desc) rows = Ord.applyDayOrder(rows, Ord.dayOrders(lid), true);   // 최근 날짜 위로 (순서를 정한 날은 그 순서 그대로)
+    const cmap = L.categoryMap(lid);
     const csvBtn = UI.el('<button class="iconbtn" title="CSV로 저장">⤓</button>');
     csvBtn.onclick = () => exportCsv(rows);
     tools.appendChild(csvBtn);
-    if (!rows.length) {
-      c.appendChild(UI.el(UI.empty(s.all ? '아직 입력한 내역이 없어요.\n＋ 버튼으로 첫 내역을 입력하세요.' : '이 달에는 내역이 없어요.')));
-    } else {
-      const cmap = L.categoryMap(lid);
-      const shown = rows.slice(0, s.limit);
-      const byDay = new Map();
-      for (const [r, b] of shown) { if (!byDay.has(r.date)) byDay.set(r.date, []); byDay.get(r.date).push([r, b]); }
-      let html = '';
-      for (const [d, list] of byDay) {
-        const di = U.sum(list.map(([r]) => r.income)), de = U.sum(list.map(([r]) => r.expense));
-        html += `<div class="dayhead"><span>${U.dateLabel(d)}</span><span class="sums">${di ? `<span class="in">+${UI.money(di)}</span> ` : ''}${de ? `<span class="out">-${UI.money(de)}</span>` : ''}</span></div>`;
-        html += `<ul class="list">${list.map(([r, b]) => Entry.rowHtml(r, b, false, cmap)).join('')}</ul>`;
-      }
-      c.appendChild(UI.el(`<div>${html}</div>`));
-      if (rows.length > s.limit) {
-        const more = UI.el(`<button class="btn block" style="margin-top:10px">더 보기 (${rows.length - s.limit}건 남음)</button>`);
-        more.onclick = () => { s.limit += 300; App.render(true); };
-        c.appendChild(more);
-      }
-      const byId = new Map(shown.map(([r]) => [r.id, r]));
-      UI.on(c, 'li[data-id]', 'click', (e, li) => Entry.open({ entry: byId.get(Number(li.dataset.id)) }));
+    const lay = UI.el('<button class="iconbtn" title="화면 구성 순서">☰</button>');
+    lay.onclick = () => App.layoutReorderSheet();
+    tools.appendChild(lay);
+    // 화면 덩어리 (순서는 설정 → 화면 꾸미기 → 가계부 화면 구성, 또는 위의 ☰)
+    const part = {
+      monthnav: () => UI.monthNav(s.y, s.m, (y, m) => { s.y = y; s.m = m; s.all = false; s.limit = 300; App.render(); }),
+      stories: () => (theme === 'feed' && rows.length ? UI.el(`<div>${storiesHtml(rows, cmap)}</div>`) : null),
+      stats: () => {
+        const [inc, exp] = L.totals(lid, start, end);
+        const bal = L.currentBalance(lid, U.today());
+        return UI.el(`<div class="box"><div class="stats">
+          <div><div class="k">이달 수입</div><div class="v in">${UI.money(inc)}</div></div>
+          <div><div class="k">이달 지출</div><div class="v out">${UI.money(exp)}</div></div>
+          <div><div class="k">차액</div><div class="v ${UI.moneyCls(inc - exp)}">${UI.money(inc - exp)}</div></div></div>
+          <div class="kv small" style="margin-top:6px;border-top:1px dashed var(--line);padding-top:5px"><span>현재 잔액 (오늘까지)</span><b class="${UI.moneyCls(bal)}">${UI.money(bal)}원</b></div></div>`);
+      },
+      opts: () => {
+        const o = UI.el(`<div class="row" style="margin-bottom:4px"><span class="chip ${s.all ? 'on' : ''}" data-o="all">전체 기간</span>
+          <span class="chip ${s.desc ? 'on' : ''}" data-o="desc">최근 것을 위로</span></div>`);
+        UI.on(o, '.chip', 'click', (e, x) => { s[x.dataset.o] = !s[x.dataset.o]; s.limit = 300; App.render(); });
+        return o;
+      },
+      list: () => {
+        if (!rows.length) return UI.el(UI.empty(s.all ? '아직 입력한 내역이 없어요.\n＋ 버튼으로 첫 내역을 입력하세요.' : '이 달에는 내역이 없어요.'));
+        const box = UI.el('<div class="ledger-wrap"></div>');
+        const shown = rows.slice(0, s.limit);
+        const byDay = new Map();
+        for (const [r, b] of shown) { if (!byDay.has(r.date)) byDay.set(r.date, []); byDay.get(r.date).push([r, b]); }
+        let html = '';
+        for (const [d, list] of byDay) html += dayHtml(theme, d, list, cmap);
+        box.appendChild(UI.el(`<div class="ledger-list">${html}</div>`));
+        if (rows.length > s.limit) {
+          const more = UI.el(`<button class="btn block" style="margin-top:10px">더 보기 (${rows.length - s.limit}건 남음)</button>`);
+          more.onclick = () => { s.limit += 300; App.render(true); };
+          box.appendChild(more);
+        }
+        const byId = new Map(shown.map(([r]) => [r.id, r]));
+        UI.on(box, 'li[data-id]', 'click', (e, li) => Entry.open({ entry: byId.get(Number(li.dataset.id)) }));
+        UI.on(box, '.dayord', 'click', (e, b) => { e.stopPropagation(); dayOrderSheet(b.dataset.d); });
+        return box;
+      },
+    };
+    for (const k of App.ledgerLayout()) {
+      const node = part[k] ? part[k]() : null;
+      if (node) c.appendChild(node);
     }
     App.fab(() => {
       const today = U.today();

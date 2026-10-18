@@ -18,6 +18,7 @@ from gagyebu.lunar import lunar_to_solar, solar_to_lunar           # noqa: E402
 from gagyebu.services import assets as A                           # noqa: E402
 from gagyebu.services import calendar_svc as C                     # noqa: E402
 from gagyebu.services import ledger as L                           # noqa: E402
+from gagyebu.services import order as O                            # noqa: E402
 from gagyebu.services import recurring as R                        # noqa: E402
 from gagyebu.services import reports as RP                         # noqa: E402
 
@@ -91,6 +92,26 @@ def build(path):
     C.simple_save(con, 'contact', {'name': '홍길동', 'mobile': '010-1234-5678', 'grp': '친구'})
     C.simple_save(con, 'diary', {'date': '2026-10-16', 'weather': 2, 'title': '흐림', 'content': '오늘은'})
     C.simple_save(con, 'memo', {'title': '장보기', 'content': '우유\n계란', 'created': '2026-10-16 09:00', 'sort': 1})
+    # 사용자가 정한 순서 (대분류·소분류·같은 날 내역·주소록·일기·메모)
+    C.simple_save(con, 'contact', {'name': '가나다', 'mobile': '010-1111-2222'})
+    C.simple_save(con, 'contact', {'name': '나중에', 'grp': '친구'})
+    C.simple_save(con, 'diary', {'date': '2026-10-15', 'title': '어제', 'content': ''})
+    C.simple_save(con, 'diary', {'date': '2026-10-16', 'title': '오늘 두 번째', 'content': ''})
+    C.simple_save(con, 'memo', {'title': '할 일', 'content': '', 'created': '2026-10-16 10:00', 'sort': 2})
+    C.simple_save(con, 'memo', {'title': '책 목록', 'content': '', 'created': '2026-10-16 11:00', 'sort': 3})
+    con.commit()
+    O.set_group_order(con, lid, ['3', '0', '9', '1'])
+    O.set_category_order(con, lid, ['31', '30'])
+    for d in ('2026-10-12', '2026-10-16', '2026-09-12'):
+        ids = [r['id'] for r in con.execute('SELECT id FROM entry WHERE ledger_id=? AND date=? ORDER BY id', (lid, d))]
+        O.set_day_order(con, lid, d, ids[::-1])
+    O.set_day_order(con, lid, '2026-09-12', sorted(ids))            # 원래 순서로 되돌리면 지워짐
+    cids = [r['id'] for r in C.simple_list(con, 'contact', 'name')]
+    O.set_list_order(con, 'contact', cids[::-1][:2])                 # 일부만 → 나머지는 뒤에
+    dids = [r['id'] for r in C.simple_list(con, 'diary', 'date DESC, id DESC')]
+    O.set_list_order(con, 'diary', dids[::-1])
+    mids = [r['id'] for r in C.simple_list(con, 'memo', 'sort, id')]
+    O.set_memo_order(con, [mids[2], mids[0], mids[1]])
     db.set_meta(con, 'settle_day', 25)
     db.set_meta(con, 'password', util.hash_password('1111'))
     con.commit()
@@ -143,9 +164,17 @@ def dump(path, out):
         res[k + '.search1'] = [r['id'] for r in L.search(con, lid, text='점심')]
         res[k + '.search2'] = [r['id'] for r in L.search(con, lid, start=D(2026, 9, 1), codes=['31', '30'], order='expense', desc=True)]
         res[k + '.search3'] = [r['id'] for r in L.search(con, lid, amount=9000, amount_side='지출', amount_op='크거나 같은 금액')]
+        res[k + '.search4'] = [r['id'] for r in L.search(con, lid, start=D(2026, 10, 1))]
+        res[k + '.search5'] = [r['id'] for r in L.search(con, lid, start=D(2026, 9, 1), desc=True)]
+        res[k + '.dayord'] = O.day_orders(con, lid)
+        res[k + '.ewb_desc'] = [[r['id'], b] for r, b in O.apply_day_order(L.entries_with_balance(con, lid), O.day_orders(con, lid), True)]
         due, later = R.pending(con, lid, TODAY)
         res[k + '.pending'] = [[[x['rule']['id'], x['date'].isoformat()] for x in due], [[x['rule']['id'], x['date'].isoformat()] for x in later]]
         res[k + '.rules'] = _j(R.rules(con, lid))
+    res['order.contact'] = [r['id'] for r in O.apply_list_order(con, 'contact', C.simple_list(con, 'contact', 'name'))]
+    res['order.contact.grp'] = [r['id'] for r in O.apply_list_order(con, 'contact', C.simple_list(con, 'contact', 'name', 'grp=?', ('친구',)))]
+    res['order.diary'] = [r['id'] for r in O.apply_list_order(con, 'diary', C.simple_list(con, 'diary', 'date DESC, id DESC'))]
+    res['order.memo'] = [r['id'] for r in C.simple_list(con, 'memo', 'sort, id')]
     res['assets.summary'] = A.summary(con)
     for a in A.accounts(con):
         res[f'acct.{a["id"]}'] = [[r['id'], b] for r, b in A.account_txs(con, a['id'])]

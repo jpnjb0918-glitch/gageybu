@@ -89,6 +89,7 @@
       randomHex(n) { const b = new Uint8Array(n); crypto.getRandomValues(b); return hex(b); },
       getPrefs() { return JSON.stringify(st.prefs); },
       setPref(k, v) { if (v === null) delete st.prefs[k]; else st.prefs[k] = v; },
+      setBars(color, light) { st.bars = [color, light]; },
       appInfo() { return ok({ version: 'dev', versionCode: 0, sdk: 0, dbPath: 'memory', dbSize: db.export().length }); },
       autoBackup() { return ok({ skipped: true }); },
       listBackups() { return ok({ items: [] }); },

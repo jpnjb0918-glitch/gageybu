@@ -3,14 +3,17 @@ import datetime as dt
 
 from PyQt6.QtCore import QStringListModel, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QCheckBox, QCompleter, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout,
-                             QLabel, QLineEdit, QSplitter, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QCompleter, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
+                             QHBoxLayout, QHeaderView, QLabel, QLineEdit, QSplitter, QVBoxLayout, QWidget)
 
 from .. import db
+from .. import theme as T
 from ..services import ledger as L
 from ..util import fmt_money, month_end
-from .widgets import (CENTER, CodeCombo, DateEdit, MoneyEdit, MonthNav, button, cell, confirm, error, export_csv,
-                      fill, make_table, money_cell, print_table, selected_ids)
+from ..services import order as O
+from .widgets import (CENTER, CodeCombo, DateEdit, MoneyEdit, MonthNav, ask_order, button, cell, confirm, error,
+                      export_csv, fill, info, make_table, money_cell, print_table, selected_ids)
+from .sns import C_ITEM, C_MEMO, LedgerDelegate, Stories
 
 
 class EntryForm(QWidget):
@@ -129,6 +132,9 @@ class LedgerPage(QWidget):
         self.table = make_table(['날짜', '품목', '수입', '지출', '잔액', '계정과목', '메모'], stretch=6, multi=True)
         self.table.itemSelectionChanged.connect(self._selected)
         self.table.doubleClicked.connect(lambda *_: self.form.item.setFocus())
+        self.sns_delegate = LedgerDelegate(self.table)      # 피드·타임라인 테마일 때만 씀
+        self.stories = Stories()
+        self.stories.hide()
 
         self.form = EntryForm(self.con)
         self.save_btn = button('저장 (F5)', self.save)
@@ -158,23 +164,27 @@ class LedgerPage(QWidget):
         self.bal_lbl = QLabel()
         self.bal_lbl.setStyleSheet('font-weight:bold')
         left = QWidget()
-        ll = QVBoxLayout(left)
+        self.left_lay = ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
-        ll.addWidget(_row(self.nav, self.all_chk, self.desc_chk, 'stretch',
-                          button('CSV', lambda: export_csv(self, self.table, '가계부내역')),
-                          button('인쇄', lambda: print_table(self, self.table, self._title()))))
-        ll.addWidget(self.table)
+        self.day_btn = button('같은 날 순서…', self.day_order, '고른 내역이 있는 날의 내역 순서 바꾸기 (PC·휴대폰 같은 자료 파일에 저장)')
+        top_row = _row(self.nav, self.all_chk, self.desc_chk, 'stretch', self.day_btn,
+                       button('CSV', lambda: export_csv(self, self.table, '가계부내역')),
+                       button('인쇄', lambda: print_table(self, self.table, self._title())))
         bottom = QWidget()
         bot = QHBoxLayout(bottom)
         bot.setContentsMargins(0, 0, 0, 0)
         bot.addWidget(self.month_lbl, 1)
         bot.addWidget(self.bal_lbl, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        ll.addWidget(bottom)
-        split = QSplitter()
+        self.parts = {'nav': top_row, 'stories': self.stories, 'table': self.table, 'summary': bottom}
+        for k in T.ledger_layout():
+            ll.addWidget(self.parts[k], 1 if k == 'table' else 0)
+        self.split = split = QSplitter()
         split.addWidget(left)
         split.addWidget(box)
         split.setStretchFactor(0, 3)
         split.setStretchFactor(1, 1)
+        self.left_w, self.box_w = left, box
+        self.layout_key = None
         lay = QVBoxLayout(self)
         lay.addWidget(split)
         QShortcut(QKeySequence('F5'), self, activated=self.save)
@@ -186,7 +196,24 @@ class LedgerPage(QWidget):
         name = self.app.ledger_name()
         return f'{name} — 전체 내역' if self.all_chk.isChecked() else f'{name} — {self.nav.y}년 {self.nav.m}월 내역'
 
+    def apply_page_layout(self):
+        """설정의 화면 구성 순서·입력 상자 위치를 적용 (바뀌었을 때만)"""
+        key = (tuple(T.ledger_layout()), T.input_side())
+        if key == self.layout_key:
+            return
+        self.layout_key = key
+        for k in self.parts:
+            self.left_lay.removeWidget(self.parts[k])
+        for k in key[0]:
+            self.left_lay.addWidget(self.parts[k], 1 if k == 'table' else 0)
+        want = [self.box_w, self.left_w] if key[1] == 'left' else [self.left_w, self.box_w]
+        if [self.split.widget(0), self.split.widget(1)] != want:
+            self.split.insertWidget(0, want[0])
+        self.split.setStretchFactor(self.split.indexOf(self.left_w), 3)
+        self.split.setStretchFactor(self.split.indexOf(self.box_w), 1)
+
     def refresh(self):
+        self.apply_page_layout()
         lid = self.app.lid
         self.form.load(lid, editing=bool(self.editing))
         y, m = self.nav.y, self.nav.m
@@ -195,13 +222,15 @@ class LedgerPage(QWidget):
             rows = L.entries_with_balance(self.con, lid)
         else:
             rows = L.entries_with_balance(self.con, lid, dt.date(y, m, 1), dt.date(y, m, month_end(y, m)))
-        if self.desc_chk.isChecked():
-            rows = rows[::-1]
+        if self.desc_chk.isChecked():           # 최근 날짜 위로 (같은 날 순서를 정한 날은 그 순서 그대로)
+            rows = O.apply_day_order(rows, O.day_orders(self.con, lid), desc=True)
         cmap = L.category_map(self.con, lid)
+        self.table.setRowCount(0)               # 줄 높이를 처음 상태로 (테마를 바꿨을 때)
         fill(self.table, [[cell(r['date'], CENTER, data=r['id']), cell(r['item']),
                            money_cell(r['income'], 'in'), money_cell(r['expense'], 'out'),
                            money_cell(bal, blank_zero=False), cell(L.code_label(cmap, r['code'])), cell(r['memo'])]
                           for r, bal in rows])
+        self._apply_layout(T.current()[0], rows, cmap)
         s, e = dt.date(y, m, 1), dt.date(y, m, month_end(y, m))
         inc, exp = L.totals(self.con, lid, s, e)
         self.month_lbl.setText(f'이달의 현황 ({y}년 {m}월)   수입: {fmt_money(inc)}   지출: {fmt_money(exp)}   '
@@ -209,6 +238,76 @@ class LedgerPage(QWidget):
         self.bal_lbl.setText(f'현재 잔액(오늘까지): {fmt_money(L.current_balance(self.con, lid, dt.date.today()))}원')
         if self.editing and not L.get_entry(self.con, self.editing):
             self.new()
+
+    def _apply_layout(self, theme, rows, cmap):
+        """피드·타임라인 테마면 표를 카드/짧은 글 모양으로 (칸 하나에 그리기), 아니면 원래 표로."""
+        t = self.table
+        sns = theme in T.SNS_THEMES
+        hh = t.horizontalHeader()
+        for col in range(t.columnCount()):
+            t.setColumnHidden(col, sns and col != C_ITEM)
+        hh.setVisible(not sns)
+        t.setShowGrid(not sns)
+        t.setAlternatingRowColors(not sns)
+        if sns:
+            sums = {}
+            for r, _b in rows:
+                d = str(r['date'])
+                a, b = sums.get(d, (0, 0))
+                sums[d] = (a + (r['income'] or 0), b + (r['expense'] or 0))
+            self.sns_delegate.theme = theme
+            self.sns_delegate.day_sums = sums
+            t.setItemDelegateForColumn(C_ITEM, self.sns_delegate)
+            t.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+            hh.setSectionResizeMode(C_MEMO, QHeaderView.ResizeMode.Interactive)
+            hh.setSectionResizeMode(C_ITEM, QHeaderView.ResizeMode.Stretch)
+            t.setUpdatesEnabled(False)
+            for i in range(t.rowCount()):
+                t.setRowHeight(i, self.sns_delegate.row_height(i))
+            t.setUpdatesEnabled(True)
+        else:
+            t.setItemDelegateForColumn(C_ITEM, t.itemDelegate())
+            t.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
+            hh.setSectionResizeMode(C_ITEM, QHeaderView.ResizeMode.ResizeToContents)
+            hh.setSectionResizeMode(C_MEMO, QHeaderView.ResizeMode.Stretch)
+        feed = theme == 'feed'
+        self.stories.setVisible(feed and bool(rows))
+        if feed:
+            by = {}
+            for r, _b in rows:
+                if r['expense']:
+                    k = L.code_label(cmap, r['code'])
+                    by[k] = by.get(k, 0) + r['expense']
+            top = sorted(by.items(), key=lambda kv: -kv[1])[:14]
+            cap = '전체 기간 지출 많은 순' if self.all_chk.isChecked() else f'{self.nav.m}월 지출 많은 순'
+            self.stories.set_items(top, cap)
+
+    def day_order(self):
+        """고른 내역이 있는 날의 내역 순서 바꾸기"""
+        ids = selected_ids(self.table)
+        if not ids:
+            info(self, '순서를 바꿀 날의 내역을 하나 고른 뒤 누르세요.')
+            return
+        e = L.get_entry(self.con, ids[0])
+        d = dt.date.fromisoformat(str(e['date']))
+        lid = self.app.lid
+        rows = [r for r, _b in L.entries_with_balance(self.con, lid, d, d)]
+        if len(rows) < 2:
+            info(self, f'{d} 에는 내역이 하나뿐입니다.')
+            return
+        cmap = L.category_map(self.con, lid)
+        items = [(r['id'], r['item'] or '(품목 없음)',
+                  ' · '.join(x for x in (L.code_label(cmap, r['code']), f"+{fmt_money(r['income'])}" if r['income'] else '',
+                                         f"-{fmt_money(r['expense'])}" if r['expense'] else '') if x)) for r in rows]
+        what, keys = ask_order(self, f'{d} 내역 순서', items, '같은 날 안에서의 순서입니다. 잔액도 이 순서로 계산되고, '
+                               '자료 파일에 저장되어 휴대폰판에서도 같은 순서로 보입니다.', '기본 순서로')
+        if what == 'save':
+            O.set_day_order(self.con, lid, d.isoformat(), [int(k) for k in keys])
+        elif what == 'reset':
+            O.set_day_order(self.con, lid, d.isoformat(), sorted(r['id'] for r in rows))
+        else:
+            return
+        self.app.data_changed()
 
     def _selected(self):
         ids = selected_ids(self.table)

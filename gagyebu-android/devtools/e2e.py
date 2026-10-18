@@ -39,6 +39,8 @@ def new_page(browser, db_bytes=None):
     if db_bytes is not None:
         ctx.add_init_script(f'window.__initialDbBytes = new Uint8Array({json.dumps(list(db_bytes))});')
     ctx.add_init_script(path=os.path.join(ROOT, 'devtools', 'fake-native.js'))
+    if os.environ.get('E2E_THEME'):        # 테마별로 같은 시험 돌리기: E2E_THEME=feed python3 e2e.py
+        ctx.add_init_script(f"window.__fake && (window.__fake.prefs.theme = {json.dumps(os.environ['E2E_THEME'])});")
     pg = ctx.new_page()
     pg.on('pageerror', lambda e: errs.append(str(e)))
     pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)

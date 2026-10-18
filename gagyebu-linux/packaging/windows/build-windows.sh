@@ -49,5 +49,19 @@ LC_ALL=C.UTF-8 makensis -V2 -INPUTCHARSET UTF8 -DVERSION="$VERSION" -DSRC="$B/Ga
 echo "[6/6] 휴대용 zip (설치 없이 압축만 풀어 실행)"
 rm -rf "$B/portable" && mkdir -p "$B/portable"
 cp -a "$B/Gagyebu" "$B/portable/우리집가계부-윈도우판-$VERSION"
-(cd "$B/portable" && rm -f "$OUT/우리집가계부-윈도우판-$VERSION-휴대용.zip" && zip -qr -9 "$OUT/우리집가계부-윈도우판-$VERSION-휴대용.zip" .)
+# 파이썬 zipfile 로 묶음: 한글 파일 이름에 UTF-8 표시가 붙어 윈도우 기본 압축 풀기에서도 이름이 안 깨짐
+# (zip 명령은 환경에 따라 이 표시를 안 붙임)
+rm -f "$OUT/우리집가계부-윈도우판-$VERSION-휴대용.zip"
+python3 - "$B/portable" "$OUT/우리집가계부-윈도우판-$VERSION-휴대용.zip" <<'EOF'
+import os
+import sys
+import zipfile
+src, dst = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    for root, dirs, files in os.walk(src):
+        dirs.sort()
+        for name in dirs + sorted(files):
+            p = os.path.join(root, name)
+            z.write(p, os.path.relpath(p, src))
+EOF
 ls -la "$OUT"

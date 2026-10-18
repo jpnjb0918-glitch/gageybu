@@ -52,7 +52,7 @@ Pages.calendar = (() => {
     const lu = Lunar.label(d);
     const an = Cal.anniversariesBetween(d, d)[d] || [];
     const sch = Cal.schedules(d, d)[d] || [];
-    const rows = DB.q('SELECT * FROM entry WHERE ledger_id=? AND date=? ORDER BY id', [lid, d]);
+    const rows = Ord.applyDayOrder(DB.q('SELECT * FROM entry WHERE ledger_id=? AND date=? ORDER BY id', [lid, d]), Ord.dayOrders(lid));
     const cmap = L.categoryMap(lid);
     const inc = U.sum(rows.map(r => r.income)), exp = U.sum(rows.map(r => r.expense));
     const body = UI.el(`<div>

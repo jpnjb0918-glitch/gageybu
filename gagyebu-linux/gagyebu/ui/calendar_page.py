@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComboB
                              QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QRadioButton,
                              QSpinBox, QSplitter, QTableWidget, QVBoxLayout, QWidget)
 
+from .. import theme as T
 from ..lunar import lunar_label
 from ..services import calendar_svc as C
 from .widgets import (CENTER, DateEdit, MonthNav, button, cell, confirm, error, export_csv, fill, h, info, make_table)
@@ -52,7 +53,7 @@ class AnniversaryDialog(QDialog):
     def load(self):
         fill(self.table, [[cell(a['title'], data=a['id']), cell(f"{a['month']:02d}-{a['day']:02d}", CENTER),
                            cell(a['year'] or '매년', CENTER), cell('음력' if a['lunar'] else '양력', CENTER),
-                           cell('휴일' if a['holiday'] else '평일', CENTER, color=QColor(SUN) if a['holiday'] else None)]
+                           cell('휴일' if a['holiday'] else '평일', CENTER, color=QColor(T.tone()['sun']) if a['holiday'] else None)]
                           for a in C.anniversaries(self.con)])
 
     def _sel(self):
@@ -200,18 +201,22 @@ class CalendarPage(QWidget):
         anns = C.anniversaries_between(self.con, start, end)
         scheds = C.schedules(self.con, start, end)
         today = dt.date.today()
+        tn = T.tone()
+        for c, key in ((0, 'sun'), (6, 'sat')):
+            self.grid.horizontalHeaderItem(c).setForeground(QColor(tn[key]))
         for w, week in enumerate(weeks):
             for c, d in enumerate(week):
                 hol = any(x[1] for x in anns.get(d, []))
-                color = SUN if (c == 0 or hol) else SAT if c == 6 else '#222'
+                color = tn['sun'] if (c == 0 or hol) else tn['sat'] if c == 6 else tn['text']
                 if d.month != m:
-                    color = '#aaa'
+                    color = tn['faint']
                 parts = [f'<span style="color:{color};font-weight:bold">{d.day}</span> '
-                         f'<span style="color:#999;font-size:8pt">({lunar_label(d)})</span>']
+                         f'<span style="color:{tn["lunar"]};font-size:8pt">({lunar_label(d)})</span>']
                 for title, holi in anns.get(d, []):
-                    parts.append(f'<span style="color:{SUN if holi else "#2f7d5b"};font-size:9pt">{html.escape(title)}</span>')
+                    parts.append(f'<span style="color:{tn["sun"] if holi else tn["ann"]};font-size:9pt">{html.escape(title)}</span>')
                 for s in scheds.get(d.isoformat(), []):
-                    style = f"font-size:9pt;color:{s['fg'] or '#333'};" + (f"background:{s['bg']};" if s['bg'] else '')
+                    fg = s['fg'] or ('#333' if s['bg'] else tn['text2'])     # 배경색을 고른 일정은 진한 글자
+                    style = f"font-size:9pt;color:{fg};" + (f"background:{s['bg']};" if s['bg'] else '')
                     txt = html.escape(s['text'].splitlines()[0][:24] if s['text'] else '')
                     parts.append(f'<span style="{style}">· {txt}</span>')
                 lab = QLabel('<br>'.join(parts))
@@ -219,7 +224,7 @@ class CalendarPage(QWidget):
                 lab.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
                 lab.setWordWrap(True)
                 lab.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-                bg = '#fff5d6' if d == today else '#eaf2ff' if d == self.sel else 'transparent'
+                bg = tn['today_bg'] if d == today else tn['sel_bg'] if d == self.sel else 'transparent'
                 lab.setStyleSheet(f'background:{bg};padding:2px')
                 self.grid.setCellWidget(w, c, lab)
                 self.grid.setItem(w, c, cell(''))

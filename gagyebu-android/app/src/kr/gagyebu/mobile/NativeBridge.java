@@ -417,6 +417,33 @@ public class NativeBridge {
         });
     }
 
+    /** 테마에 맞춰 맨 위 상태 표시줄·맨 아래 내비게이션 줄 색 바꾸기. lightBg 면 아이콘을 어둡게. */
+    @JavascriptInterface
+    public void setBars(final String color, final boolean lightBg) {
+        act.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    int c = android.graphics.Color.parseColor(color);
+                    android.view.Window w = act.getWindow();
+                    w.setStatusBarColor(c);
+                    w.setNavigationBarColor(c);
+                    android.view.View d = w.getDecorView();
+                    int f = d.getSystemUiVisibility();
+                    final int lightStatus = 0x2000;   // SYSTEM_UI_FLAG_LIGHT_STATUS_BAR (API 23)
+                    final int lightNav = 0x10;        // SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR (API 26)
+                    f = lightBg ? (f | lightStatus) : (f & ~lightStatus);
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        f = lightBg ? (f | lightNav) : (f & ~lightNav);
+                    }
+                    d.setSystemUiVisibility(f);
+                } catch (RuntimeException ignored) {
+                    // 색 이름이 틀리거나 창이 없으면 그대로 둠
+                }
+            }
+        });
+    }
+
     @JavascriptInterface
     public void exitApp() {
         act.runOnUiThread(new Runnable() {

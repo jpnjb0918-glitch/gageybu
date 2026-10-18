@@ -69,6 +69,26 @@ window.__compat = {
     Cal.simpleSave('contact', { name: '홍길동', mobile: '010-1234-5678', grp: '친구' });
     Cal.simpleSave('diary', { date: '2026-10-16', weather: 2, title: '흐림', content: '오늘은' });
     Cal.simpleSave('memo', { title: '장보기', content: '우유\n계란', created: '2026-10-16 09:00', sort: 1 });
+    Cal.simpleSave('contact', { name: '가나다', mobile: '010-1111-2222' });
+    Cal.simpleSave('contact', { name: '나중에', grp: '친구' });
+    Cal.simpleSave('diary', { date: '2026-10-15', title: '어제', content: '' });
+    Cal.simpleSave('diary', { date: '2026-10-16', title: '오늘 두 번째', content: '' });
+    Cal.simpleSave('memo', { title: '할 일', content: '', created: '2026-10-16 10:00', sort: 2 });
+    Cal.simpleSave('memo', { title: '책 목록', content: '', created: '2026-10-16 11:00', sort: 3 });
+    Ord.setGroupOrder(lid, ['3', '0', '9', '1']);
+    Ord.setCategoryOrder(lid, ['31', '30']);
+    let ids = [];
+    for (const d of ['2026-10-12', '2026-10-16', '2026-09-12']) {
+      ids = DB.q('SELECT id FROM entry WHERE ledger_id=? AND date=? ORDER BY id', [lid, d]).map(r => r.id);
+      Ord.setDayOrder(lid, d, ids.slice().reverse());
+    }
+    Ord.setDayOrder(lid, '2026-09-12', ids.slice().sort((a, b) => a - b));
+    const cids = Cal.simpleList('contact', 'name').map(r => r.id);
+    Ord.setListOrder('contact', cids.slice().reverse().slice(0, 2));
+    const dids = Cal.simpleList('diary', 'date DESC, id DESC').map(r => r.id);
+    Ord.setListOrder('diary', dids.slice().reverse());
+    const mids = Cal.simpleList('memo', 'sort, id').map(r => r.id);
+    Ord.setMemoOrder([mids[2], mids[0], mids[1]]);
     DB.setMeta('settle_day', 25);
     DB.setMeta('password', Bk.hashPassword('1111'));
     DB.setJson('address_labels', { tel1: '집전화' });
@@ -103,10 +123,18 @@ window.__compat = {
       res[k + '.search1'] = L.search(lid, { text: '점심' }).map(r => r.id);
       res[k + '.search2'] = L.search(lid, { start: '2026-09-01', codes: ['31', '30'], order: 'expense', desc: true }).map(r => r.id);
       res[k + '.search3'] = L.search(lid, { amount: 9000, amountSide: '지출', amountOp: '크거나 같은 금액' }).map(r => r.id);
+      res[k + '.search4'] = L.search(lid, { start: '2026-10-01' }).map(r => r.id);
+      res[k + '.search5'] = L.search(lid, { start: '2026-09-01', desc: true }).map(r => r.id);
+      res[k + '.dayord'] = Ord.dayOrders(lid);
+      res[k + '.ewb_desc'] = Ord.applyDayOrder(L.entriesWithBalance(lid), Ord.dayOrders(lid), true).map(([r, b]) => [r.id, b]);
       const [due, later] = R.pending(lid, TODAY);
       res[k + '.pending'] = [due.map(x => [x.rule.id, x.date]), later.map(x => [x.rule.id, x.date])];
       res[k + '.rules'] = R.rules(lid);
     }
+    res['order.contact'] = Ord.applyListOrder('contact', Cal.simpleList('contact', 'name')).map(r => r.id);
+    res['order.contact.grp'] = Ord.applyListOrder('contact', Cal.simpleList('contact', 'name', 'grp=?', ['친구'])).map(r => r.id);
+    res['order.diary'] = Ord.applyListOrder('diary', Cal.simpleList('diary', 'date DESC, id DESC')).map(r => r.id);
+    res['order.memo'] = Cal.simpleList('memo', 'sort, id').map(r => r.id);
     res['assets.summary'] = A.summary();
     for (const a of A.accounts()) {
       res[`acct.${a.id}`] = A.accountTxs(a.id).map(([r, b]) => [r.id, b]);

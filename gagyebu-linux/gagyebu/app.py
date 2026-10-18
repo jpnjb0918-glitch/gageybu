@@ -91,9 +91,14 @@ class MainWindow(QMainWindow):
         self.hompy_caption.setObjectName('HompyCaption')
         self.marquee = H.Marquee()
         self.marquee.setMaximumWidth(520)
+        self.sns_avatar = QLabel()                    # 피드·타임라인 테마: 동그란 미니미
+        self.sns_avatar.setObjectName('SnsAvatar')
+        self.sns_avatar.setFixedSize(40, 40)
+        self.sns_avatar.setToolTip('미니미 바꾸기: 설정 → 화면 꾸미기')
         top = QHBoxLayout()
+        self.top_lay = top
         top.setSpacing(10)
-        for w in (self.today_lbl, self.hompy_title, self.hompy_caption):
+        for w in (self.sns_avatar, self.today_lbl, self.hompy_title, self.hompy_caption):
             top.addWidget(w)
         top.addStretch(1)
         top.addWidget(self.marquee, 1)
@@ -117,8 +122,9 @@ class MainWindow(QMainWindow):
         self.nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.stack = QStackedWidget()
+        self.nav_order = list(range(len(self.pages)))      # 메뉴 줄 번호 → 화면 번호 (메뉴 순서는 바꿀 수 있음)
+        self.apply_nav_order(select=False)
         for p in self.pages:
-            self.nav.addItem(QListWidgetItem(p.title))
             # 화면이 좁으면 창이 화면 밖으로 넘치지 않고 그 화면만 스크롤되게
             sa = QScrollArea()
             sa.setWidgetResizable(True)
@@ -164,9 +170,20 @@ class MainWindow(QMainWindow):
         """설정의 테마(미니홈피/기본)를 적용: 스타일 + 배치(탭 위치·프로필·제목 띠) 바꾸기."""
         theme, _pixel = TH.apply()
         retro = theme == 'retro'
+        sns = theme in TH.SNS_THEMES
         self.backdrop.retro = retro
-        for w in (self.today_lbl, self.hompy_title, self.hompy_caption, self.profile, self.banner):
+        for w in (self.hompy_caption, self.profile, self.banner):
             w.setVisible(retro)
+        for w in (self.today_lbl, self.hompy_title):
+            w.setVisible(retro or sns)
+        self.sns_avatar.setVisible(sns)
+        if sns:
+            self.sns_avatar.setPixmap(TH.avatar_pixmap(TH.pref('minimi'), 40, theme))
+        self.hompy_title.setText('☆ 우리집 가계부 ☆' if retro else '우리집 가계부')
+        # 미니홈피: [TODAY] 제목 / 피드·타임라인: (미니미) 제목 [TODAY]
+        self.top_lay.removeWidget(self.today_lbl)
+        i = self.top_lay.indexOf(self.hompy_title)
+        self.top_lay.insertWidget(i + 1 if sns else i, self.today_lbl)
         self.marquee.setVisible(retro)
         self.marquee.set_running(retro and TH.pref('marquee'))
         self.ledger_lbl.setText('장부:' if retro else ' 장부: ')
@@ -186,7 +203,7 @@ class MainWindow(QMainWindow):
             self.main_lay.setSpacing(6)
         else:
             self.body.insertWidget(0, self.navwrap)
-            self.nav.setFixedWidth(150)
+            self.nav.setFixedWidth(170 if sns else 150)
             self.nav.setMinimumHeight(0)
             self.nav.setMaximumHeight(16777215)
             self.nav_lay.setContentsMargins(0, 0, 9, 0)
@@ -203,6 +220,21 @@ class MainWindow(QMainWindow):
         self.backdrop.update()
         if refresh:
             self.data_changed()
+
+    def apply_nav_order(self, select=True):
+        """설정의 메뉴 순서대로 왼쪽(오른쪽) 메뉴를 다시 채움. 첫 줄이 처음 화면."""
+        names = [type(p).__name__ for p in self.pages]
+        order = [names.index(n) for n in TH.nav_order() if n in names]
+        order += [i for i in range(len(self.pages)) if i not in order]
+        cur = self.nav_order[self.nav.currentRow()] if 0 <= self.nav.currentRow() < len(self.nav_order) else None
+        self.nav_order = order
+        self.nav.blockSignals(True)
+        self.nav.clear()
+        for i in order:
+            self.nav.addItem(QListWidgetItem(self.pages[i].title))
+        self.nav.blockSignals(False)
+        if select and cur is not None:
+            self.nav.setCurrentRow(order.index(cur))
 
     def _fit_nav(self):
         """탭 목록 높이를 내용에 맞춤 (틀 옆에 탭만 붙어 보이게)."""
@@ -259,9 +291,10 @@ class MainWindow(QMainWindow):
         bal = self.update_hompy()
         self.statusBar().showMessage(f'{self.ledger_name()}  ·  현재 잔액(오늘까지) {bal}원')
 
-    def _page_changed(self, i):
-        if i < 0:
+    def _page_changed(self, row):
+        if row < 0 or row >= len(self.nav_order):
             return
+        i = self.nav_order[row]
         self.stack.setCurrentIndex(i)
         self.banner.set_page(self.pages[i])
         if i in self.dirty:
@@ -271,7 +304,7 @@ class MainWindow(QMainWindow):
     def goto(self, page_cls_name):
         for i, p in enumerate(self.pages):
             if type(p).__name__ == page_cls_name:
-                self.nav.setCurrentRow(i)
+                self.nav.setCurrentRow(self.nav_order.index(i))
                 return p
 
     # ── DB 교체 (가져오기·복원) ──

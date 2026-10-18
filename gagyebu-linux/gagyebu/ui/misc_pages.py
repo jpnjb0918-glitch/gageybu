@@ -7,9 +7,10 @@ from PyQt6.QtWidgets import (QComboBox, QFormLayout, QGroupBox, QInputDialog, QL
 
 from .. import db
 from ..services import calendar_svc as C
+from ..services import order as O
 from ..util import WEATHER
-from .widgets import (CENTER, DateEdit, FormDialog, MonthNav, button, cell, confirm, error, export_csv, fill, h,
-                      make_table, print_table, selected_ids)
+from .widgets import (CENTER, DateEdit, FormDialog, MonthNav, ask_order, button, cell, confirm, error, export_csv, fill, h,
+                      info, make_table, print_table, selected_ids)
 
 ADDR_FIELDS = [('name', '성명'), ('mobile', '휴대폰'), ('tel1', '전화1'), ('tel2', '전화2'), ('fax', '팩스번호'),
                ('email', '전자우편'), ('homepage', '홈페이지'), ('address', '주소'), ('zipcode', '우편번호'),
@@ -32,7 +33,8 @@ class AddressPage(QWidget):
         lay = QVBoxLayout(self)
         lay.addWidget(h('찾기 조건', self.field, self.q, button('검색', self.refresh), 'stretch',
                         button('추가', self.add), button('수정', self.edit), button('삭제', self.delete),
-                        button('항목 이름 바꾸기', self.rename), button('CSV', lambda: export_csv(self, self.table, '주소록')),
+                        button('항목 이름 바꾸기', self.rename), button('순서 바꾸기…', self.order),
+                        button('CSV', lambda: export_csv(self, self.table, '주소록')),
                         button('인쇄', lambda: print_table(self, self.table, '주소록'))))
         lay.addWidget(self.table, 1)
         lay.addWidget(self.count)
@@ -63,9 +65,27 @@ class AddressPage(QWidget):
             else:
                 where = ' OR '.join(f'{k} LIKE ?' for k, _ in ADDR_FIELDS)
                 args = (like,) * len(ADDR_FIELDS)
-        rows = C.simple_list(self.con, 'contact', 'name', where, args)
+        rows = O.apply_list_order(self.con, 'contact', C.simple_list(self.con, 'contact', 'name', where, args))
+        self.rows = rows
         fill(self.table, [[cell(r[k], data=r['id'] if i == 0 else None) for i, (k, _) in enumerate(labels)] for r in rows])
         self.count.setText(f'{len(rows)}명')
+
+    def order(self):
+        rows = getattr(self, 'rows', [])
+        if len(rows) < 2:
+            info(self, '순서를 바꿀 연락처가 2명 이상이어야 합니다.')
+            return
+        what, keys = ask_order(self, '주소록 순서', [(r['id'], r['name'], ' · '.join(x for x in (r['grp'], r['mobile'] or r['tel1']) if x))
+                                                for r in rows],
+                               ('지금 보이는 사람들끼리의 순서입니다. ' if self.q.text().strip() else '') +
+                               '새로 추가한 사람은 맨 아래에 붙습니다. 휴대폰판에서도 같은 순서로 보입니다.', '이름순으로')
+        if what is None:
+            return
+        O.merge_list_order(self.con, 'contact', [r['id'] for r in rows], [int(k) for k in keys] if what == 'save' else None)
+        self.page_changed()
+
+    def page_changed(self):
+        self.refresh()
 
     def _dialog(self, title, values=None):
         d = FormDialog(self, title, [(k, v, 'text*' if k == 'name' else 'memo' if k == 'memo' else 'text')
@@ -149,7 +169,7 @@ class DiaryPage(QWidget):
         ll.addWidget(self.nav)
         ll.addWidget(h(self.q, button('검색', self.refresh)))
         ll.addWidget(self.list, 1)
-        ll.addWidget(button('CSV', lambda: export_csv(self, self.list, '일기장')))
+        ll.addWidget(h(button('순서 바꾸기…', self.order), 'stretch', button('CSV', lambda: export_csv(self, self.list, '일기장'))))
         sp = QSplitter()
         sp.addWidget(left)
         sp.addWidget(right)
@@ -159,13 +179,27 @@ class DiaryPage(QWidget):
     def refresh(self):
         q = self.q.text().strip()
         if q:
-            rows = C.simple_list(self.con, 'diary', 'date DESC', 'title LIKE ? OR content LIKE ?', (f'%{q}%',) * 2)
+            rows = O.apply_list_order(self.con, 'diary', C.simple_list(self.con, 'diary', 'date DESC', 'title LIKE ? OR content LIKE ?', (f'%{q}%',) * 2))
         else:
             ym = f'{self.nav.y:04d}-{self.nav.m:02d}'
-            rows = C.simple_list(self.con, 'diary', 'date DESC', 'substr(date,1,7)=?', (ym,))
+            rows = O.apply_list_order(self.con, 'diary', C.simple_list(self.con, 'diary', 'date DESC', 'substr(date,1,7)=?', (ym,)))
+        self.rows = rows
         fill(self.list, [[cell(r['date'], CENTER, data=r['id']),
                           cell(WEATHER[r['weather']] if 0 <= r['weather'] < len(WEATHER) else '', CENTER),
                           cell(r['title'] or (r['content'] or '').split('\n')[0][:30])] for r in rows])
+
+    def order(self):
+        rows = getattr(self, 'rows', [])
+        if len(rows) < 2:
+            info(self, '순서를 바꿀 일기가 2개 이상이어야 합니다.')
+            return
+        what, keys = ask_order(self, '일기 순서', [(r['id'], r['title'] or '(제목 없음)', str(r['date'])) for r in rows],
+                               ('찾은 일기' if self.q.text().strip() else f'{self.nav.m}월 일기') +
+                               '끼리의 순서입니다. 새로 쓴 일기는 맨 아래에 붙습니다.', '날짜순으로')
+        if what is None:
+            return
+        O.merge_list_order(self.con, 'diary', [r['id'] for r in rows], [int(k) for k in keys] if what == 'save' else None)
+        self.refresh()
 
     def _sel(self):
         ids = selected_ids(self.list)
@@ -230,7 +264,7 @@ class MemoPage(QWidget):
         self.q.setPlaceholderText('제목·내용 검색')
         self.q.returnPressed.connect(self.refresh)
         self.order = QComboBox()
-        self.order.addItems(['입력순', '제목순', '최근 작성순'])
+        self.order.addItems(['내가 정한 순서', '제목순', '최근 작성순'])
         self.order.currentIndexChanged.connect(lambda *_: self.refresh())
         self.list = make_table(['제목', '작성일시'], stretch=0)
         self.list.itemSelectionChanged.connect(self._sel)
@@ -247,8 +281,8 @@ class MemoPage(QWidget):
         ll.setContentsMargins(0, 0, 0, 0)
         ll.addWidget(h(self.q, self.order))
         ll.addWidget(self.list, 1)
-        ll.addWidget(h(button('위로', lambda: self.move(-1)), button('아래로', lambda: self.move(1)), 'stretch',
-                       button('CSV', self.export)))
+        ll.addWidget(h(button('위로', lambda: self.move(-1)), button('아래로', lambda: self.move(1)),
+                       button('순서 바꾸기…', self.reorder), 'stretch', button('CSV', self.export)))
         sp = QSplitter()
         sp.addWidget(left)
         sp.addWidget(right)
@@ -312,6 +346,20 @@ class MemoPage(QWidget):
             for i in range(self.list.rowCount()):
                 if self.list.item(i, 0).data(Qt.ItemDataRole.UserRole) == ids[0]:
                     self.list.selectRow(i)
+
+    def reorder(self):
+        rows = C.simple_list(self.con, 'memo', 'sort, id')
+        if len(rows) < 2:
+            info(self, '메모가 2개 이상이어야 합니다.')
+            return
+        what, keys = ask_order(self, '메모 순서', [(r['id'], r['title'] or (r['content'] or '').split('\n')[0][:30] or '(빈 메모)',
+                                                r['created'] or '') for r in rows],
+                               "'내가 정한 순서'로 볼 때의 순서입니다. 새 메모는 맨 아래에 붙습니다.")
+        if what != 'save':
+            return
+        O.set_memo_order(self.con, [int(k) for k in keys])
+        self.order.setCurrentIndex(0)
+        self.refresh()
 
     def export(self):
         t = make_table(['제목', '작성일시', '내용'])

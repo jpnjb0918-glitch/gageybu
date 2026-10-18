@@ -59,18 +59,28 @@ def reset_ledger(con, lid):
 
 # ── 계정과목 ────────────────────────────────────────────
 def groups(con, lid):
+    """대분류 (사용자가 정한 순서가 있으면 그 순서, 없으면 코드 순)"""
+    from . import order as O
     rows = con.execute('SELECT code, name FROM cat_group WHERE ledger_id=?', (lid,)).fetchall()
-    return sorted(rows, key=lambda r: CODE_CHARS.find(r['code']) if r['code'] in CODE_CHARS else 99)
+    rows = sorted(rows, key=lambda r: CODE_CHARS.find(r['code']) if r['code'] in CODE_CHARS else 99)
+    return O.by_list(rows, O.group_order(con, lid), key=lambda r: r['code'])
+
+
+def _group_rank(con, lid):
+    return {g['code']: i for i, g in enumerate(groups(con, lid))}
 
 
 def categories(con, lid, group=None):
+    """소분류: 대분류 순서 → sort(사용자가 정한 순서) → 코드"""
     q = 'SELECT code, name, sort FROM category WHERE ledger_id=?'
     args = [lid]
     if group is not None:
         q += ' AND substr(code,1,1)=?'
         args.append(group)
     rows = con.execute(q, args).fetchall()
-    return sorted(rows, key=lambda r: (CODE_CHARS.find(r['code'][:1]), r['sort'], r['code']))
+    rank = _group_rank(con, lid)
+    return sorted(rows, key=lambda r: (rank.get(r['code'][:1], 100 + max(CODE_CHARS.find(r['code'][:1]), 0)),
+                                       r['sort'], r['code']))
 
 
 def category_map(con, lid):
@@ -205,6 +215,8 @@ def entries_with_balance(con, lid, start=None, end=None):
         q += ' AND date<=?'
         args.append(iso(end))
     rows = con.execute(q + ' ORDER BY date, id', args).fetchall()
+    from . import order as O
+    rows = O.apply_day_order(rows, O.day_orders(con, lid))        # 같은 날 안은 사용자가 정한 순서
     bal = balance_before(con, lid, start) if start else 0
     out = []
     for r in rows:
@@ -263,7 +275,11 @@ def search(con, lid, start=None, end=None, text=None, codes=None, amount=None, a
     col = {'date': 'date', 'item': 'item', 'income': 'income', 'expense': 'expense', 'code': 'code',
            'memo': 'memo'}.get(order, 'date')
     q += f" ORDER BY {col} {'DESC' if desc else 'ASC'}, id {'DESC' if desc else 'ASC'}"
-    return con.execute(q, a).fetchall()
+    rows = con.execute(q, a).fetchall()
+    if col == 'date':
+        from . import order as O
+        rows = O.apply_day_order(sorted(rows, key=lambda r: (r['date'], r['id'])), O.day_orders(con, lid), desc)
+    return rows
 
 
 # ── 품목 자동완성 ───────────────────────────────────────

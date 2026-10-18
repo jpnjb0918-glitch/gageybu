@@ -74,6 +74,8 @@ class DetailDialog(QDialog):
             q += ' AND code=?' if len(code) == 2 else ' AND substr(code,1,1)=?'
             a.append(code)
         rows = con.execute(q + ' ORDER BY date, id', a).fetchall()
+        from ..services import order as O
+        rows = O.apply_day_order(rows, O.day_orders(con, lid))
         cmap = L.category_map(con, lid)
         t = make_table(['날짜', '품목', '수입', '지출', '계정과목', '메모'], stretch=5)
         fill(t, [[cell(r['date'], CENTER), cell(r['item']), money_cell(r['income'], 'in'),

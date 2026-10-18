@@ -11,8 +11,9 @@ from .. import db
 from ..services import backup as B
 from ..services import importer as I
 from ..services import ledger as L
+from ..services import order as O
 from ..util import CODE_CHARS, check_password, hash_password
-from .widgets import (CENTER, button, cell, confirm, error, fill, h, info, make_table, selected_ids)
+from .widgets import (CENTER, ask_order, button, cell, confirm, error, fill, h, info, make_table, selected_ids)
 
 
 class CategoryTab(QWidget):
@@ -23,18 +24,20 @@ class CategoryTab(QWidget):
         self.gt = make_table(['코드', '대분류'], stretch=1)
         self.gt.itemSelectionChanged.connect(self.load_cats)
         self.ct = make_table(['계정코드', '계정과목', '사용 건수'], stretch=1)
-        self.info = QLabel('대분류 0번은 수입, 나머지(1~9, a~z)는 지출입니다. 계정코드 = 대분류 + 소분류 한 자리')
+        self.info = QLabel('대분류 0번은 수입, 나머지(1~9, a~z)는 지출입니다. 계정코드 = 대분류 + 소분류 한 자리\n'
+                           '순서는 입력할 때 고르는 목록과 결산 보고서에 그대로 쓰이고, 휴대폰판에서도 같습니다.')
         self.info.setStyleSheet('color:#666')
         gbox = QGroupBox('대분류')
         gl = QVBoxLayout(gbox)
         gl.addWidget(self.gt)
         gl.addWidget(h(button('추가', self.add_group), button('이름 변경', self.rename_group),
-                       button('삭제', self.del_group)))
+                       button('삭제', self.del_group), button('순서 바꾸기…', self.order_groups)))
         cbox = QGroupBox('소분류 (계정과목)')
         cl = QVBoxLayout(cbox)
         cl.addWidget(self.ct)
         cl.addWidget(h(button('추가', self.add_cat), button('이름 변경', self.rename_cat),
                        button('위로', lambda: self.move(-1)), button('아래로', lambda: self.move(1)),
+                       button('순서 바꾸기…', self.order_cats),
                        button('다른 계정으로 합치기', self.merge), button('삭제', self.del_cat)))
         lay = QVBoxLayout(self)
         lay.addWidget(self.info)
@@ -69,6 +72,37 @@ class CategoryTab(QWidget):
         rows = L.categories(self.con, self.lid, g) if g is not None else []
         fill(self.ct, [[cell(c['code'], CENTER, data=c['code']), cell(c['name']),
                         cell(L.category_usage(self.con, self.lid, c['code'])['entry'], CENTER)] for c in rows])
+
+    def order_groups(self):
+        gs = L.groups(self.con, self.lid)
+        what, keys = ask_order(self, '대분류 순서', [(g['code'], f"({g['code']}) {g['name']}", '') for g in gs],
+                               '', '코드 순으로')
+        if what == 'save':
+            O.set_group_order(self.con, self.lid, keys)
+        elif what == 'reset':
+            O.set_group_order(self.con, self.lid, [])
+        else:
+            return
+        self.page.app.data_changed()
+
+    def order_cats(self):
+        g = self.group()
+        if g is None:
+            info(self, '왼쪽에서 대분류를 고르세요.')
+            return
+        cats = L.categories(self.con, self.lid, g)
+        if len(cats) < 2:
+            info(self, '이 대분류에는 소분류가 2개 이상 있어야 합니다.')
+            return
+        what, keys = ask_order(self, f'소분류 순서 ({g})', [(c['code'], f"{c['code']} {c['name']}", '') for c in cats],
+                               '', '코드 순으로')
+        if what == 'save':
+            O.set_category_order(self.con, self.lid, keys)
+        elif what == 'reset':
+            O.set_category_order(self.con, self.lid, sorted(c['code'] for c in cats))
+        else:
+            return
+        self.page.app.data_changed()
 
     def add_group(self):
         used = {g['code'] for g in L.groups(self.con, self.lid)}
@@ -493,6 +527,9 @@ class ThemeTab(QWidget):
         self.theme = QComboBox()
         self.theme.addItem('미니홈피 (2000년대 감성)', 'retro')
         self.theme.addItem('기본 (처음 화면)', 'basic')
+        self.theme.addItem('피드 (사진 SNS 느낌)', 'feed')
+        self.theme.addItem('타임라인 (짧은 글 SNS 느낌, 밝게)', 'timeline')
+        self.theme.addItem('타임라인 (짧은 글 SNS 느낌, 어둡게)', 'timeline_dark')
         self.font = QComboBox()
         self.font.addItem('도트 글꼴 (갈무리11)', 'pixel')
         self.font.addItem('시스템 글꼴', 'system')
@@ -506,6 +543,29 @@ class ThemeTab(QWidget):
         fl.addRow('글꼴', self.font)
         fl.addRow('', self.marquee)
         fl.addRow('미니미', h(self.minimi, button('바꾸기…', self.pick), 'stretch'))
+        # 순서 (이 PC에만 저장)
+        obox = QGroupBox('순서')
+        ol = QFormLayout(obox)
+        self.side = QComboBox()
+        self.side.addItem('오른쪽', 'right')
+        self.side.addItem('왼쪽', 'left')
+        ol.addRow('메뉴', h(button('메뉴 순서 바꾸기…', self.order_nav), QLabel('맨 위 메뉴가 처음 화면'), 'stretch'))
+        ol.addRow('가계부 화면', h(button('화면 구성 순서…', self.order_layout), QLabel('입력 상자'), self.side, 'stretch'))
+        ol.addRow('', QLabel('계정과목 순서는 계정과목 탭, 같은 날 내역 순서는 가계부 화면의 [같은 날 순서…]에서 바꿉니다.'))
+        # 이 테마의 색
+        cbox = QGroupBox('이 테마의 색')
+        from PyQt6.QtWidgets import QGridLayout
+        cg = QGridLayout(cbox)
+        self.color_btns = {}
+        for r, (k, label) in enumerate(T.COLOR_KEYS):
+            b = button('', lambda _c=False, k=k: self.pick_color(k))
+            b.setMinimumWidth(130)
+            self.color_btns[k] = b
+            cg.addWidget(QLabel(label), r // 2, (r % 2) * 3)
+            cg.addWidget(b, r // 2, (r % 2) * 3 + 1)
+            cg.addWidget(button('처음 색', lambda _c=False, k=k: self.reset_color(k)), r // 2, (r % 2) * 3 + 2)
+        cg.addWidget(h(button('이 테마 색 모두 처음으로', lambda: self.reset_color(None)),
+                       QLabel('나머지 색(테두리·흐린 글자 등)은 고른 색에 맞춰 자동으로 바뀝니다.'), 'stretch'), 3, 0, 1, 6)
         self.note = QLabel()
         self.note.setWordWrap(True)
         credit = QLabel('스티커 그림: 사용자가 넣어 준 고양이 스티커 시트에서 오려 낸 것 (assets/stickers)\n'
@@ -513,28 +573,86 @@ class ThemeTab(QWidget):
         credit.setStyleSheet('color:#777')
         lay = QVBoxLayout(self)
         lay.addWidget(box)
+        lay.addWidget(obox)
+        lay.addWidget(cbox)
         lay.addWidget(self.note)
         lay.addStretch(1)
         lay.addWidget(credit)
+        self.side.currentIndexChanged.connect(self._side_changed)
         self.theme.currentIndexChanged.connect(self._changed)
         self.font.currentIndexChanged.connect(self._changed)
         self.marquee.toggled.connect(self._changed)
 
+    # ── 순서 ──
+    def order_nav(self):
+        app = self.page.app
+        names = {type(p).__name__: p.title for p in app.pages}
+        what, keys = ask_order(self, '메뉴 순서', [(k, names[k], '') for k in self.T.nav_order() if k in names],
+                               '맨 위 메뉴가 프로그램을 켰을 때 처음 보이는 화면입니다.', '기본 순서로',
+                               sub_for=lambda i, k: '← 처음 화면' if i == 0 else '')
+        if what is None:
+            return
+        self.T.set_nav_order(keys if what == 'save' else None)
+        app.apply_nav_order()
+        if self.T.current()[0] == 'retro':
+            app._fit_nav()
+
+    def order_layout(self):
+        labels = dict(self.T.LEDGER_PARTS)
+        what, keys = ask_order(self, '가계부 화면 구성', [(k, labels[k], '') for k in self.T.ledger_layout()],
+                               '가계부 화면 왼쪽(목록 쪽) 덩어리의 위아래 순서입니다.', '기본 순서로')
+        if what is None:
+            return
+        self.T.set_ledger_layout(keys if what == 'save' else None)
+        self.page.app.data_changed()
+
+    def _side_changed(self, *_):
+        self.T.set_input_side(self.side.currentData())
+        self.page.app.data_changed()
+
+    # ── 색 ──
+    def _draw_colors(self):
+        T = self.T
+        eff, cu = T.effective_colors(), T.custom_colors()
+        for k, b in self.color_btns.items():
+            v = eff[k]
+            fg = '#FFFFFF' if T.lum(v) < 0.4 else '#1A1A1A'
+            b.setText(v + ('  ✎' if k in cu else ''))
+            b.setStyleSheet(f'QPushButton {{ background: {v}; color: {fg}; border: 1px solid #888; border-radius: 6px; '
+                            f'padding: 4px 10px; font-family: monospace; }}')
+
+    def pick_color(self, k):
+        from . import widgets as W
+        label = dict(self.T.COLOR_KEYS)[k]
+        v = W.pick_color(self, self.T.effective_colors()[k], f'{label} 색 고르기')
+        if v:
+            self.T.set_custom_color(k, v)
+            self.page.app.apply_theme()
+            self.refresh()
+
+    def reset_color(self, k):
+        self.T.set_custom_color(k, None)
+        self.page.app.apply_theme()
+        self.refresh()
+
     def refresh(self):
         T = self.T
-        for w in (self.theme, self.font, self.marquee):
+        for w in (self.theme, self.font, self.marquee, self.side):
             w.blockSignals(True)
+        self.side.setCurrentIndex(max(0, self.side.findData(T.input_side())))
         self.theme.setCurrentIndex(max(0, self.theme.findData(T.pref('theme'))))
         self.font.setCurrentIndex(max(0, self.font.findData(T.pref('font'))))
         self.marquee.setChecked(T.pref('marquee'))
-        for w in (self.theme, self.font, self.marquee):
+        for w in (self.theme, self.font, self.marquee, self.side):
             w.blockSignals(False)
+        self._draw_colors()
         retro = T.pref('theme') == 'retro'
         self.font.setEnabled(retro)
         self.marquee.setEnabled(retro)
         self.minimi.setPixmap(T.sticker_pixmap(T.pref('minimi'), 96))
         fam = T.load_fonts()
         self.note.setText('· 바꾸면 바로 적용됩니다. 글꼴·전광판은 미니홈피 테마에서만 쓰입니다.\n'
+                          '· 피드·타임라인 테마는 가계부 목록이 카드·타임라인 모양으로 바뀝니다. 기능은 같습니다.\n'
                           '· 프로필의 ◀ 단추로 프로필을 접을 수 있습니다 (좁은 화면에서 유용).'
                           + ('' if fam else '\n· 도트 글꼴 파일을 불러오지 못해 시스템 글꼴을 씁니다.'))
 
@@ -552,6 +670,7 @@ class ThemeTab(QWidget):
         if dlg.exec() and dlg.selected():
             self.T.set_pref('minimi', dlg.selected())
             self.page.app.profile.load_prefs()
+            self.page.app.apply_theme(refresh=False)      # 피드·타임라인 테마의 맨 위 동그란 미니미
             self.refresh()
 
 

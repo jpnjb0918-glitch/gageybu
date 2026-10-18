@@ -2,10 +2,12 @@
 'use strict';
 Pages.more = {
   title: '더보기', sticker: 'a10', sub: '이것저것 다 있어요',
-  render(c) {
-    const tiles = [['search', '검색', 'b23'], ['graph', '그래프', 'b26'], ['recurring', '예약 입력', 'b38'], ['anniv', '기념일', 'b11'],
-      ['contacts', '주소록', 'a13'], ['diary', '일기장', 'b33'], ['memo', '메모장', 'a19'], ['settings', '설정', 'b08'], ['help', '도움말', 'b02']];
-    c.appendChild(UI.el(`<div class="tiles">${tiles.map(([k, l, st]) => `<button class="tile" data-p="${k}"><img src="${UI.sticker(st)}" alt="">${l}</button>`).join('')}</div>`));
+  render(c, p, tools) {
+    const ord = UI.el('<button class="btn sm">메뉴 순서</button>');
+    ord.onclick = () => App.navReorderSheet();
+    tools.appendChild(ord);
+    const tiles = App.moreKeys();
+    c.appendChild(UI.el(`<div class="tiles">${tiles.map(k => { const [l, st] = App.navLabel(k); return `<button class="tile" data-p="${k}"><img src="${UI.sticker(st)}" alt="">${l}</button>`; }).join('')}</div>`));
     UI.on(c, '[data-p]', 'click', (e, b) => App.go(b.dataset.p, {}, true));
   },
 };
@@ -22,6 +24,8 @@ Pages.contacts = (() => {
     const ren = UI.el('<button class="btn sm">항목 이름</button>');
     ren.onclick = renameLabels;
     tools.appendChild(ren);
+    const ordb = UI.el('<button class="btn sm">순서</button>');
+    tools.appendChild(ordb);
     const lab = Object.fromEntries(labels());
     const f = UI.el(`<div class="row" style="margin-bottom:8px"><input class="inp grow" type="text" placeholder="찾을 글자 (이름·전화·메모…)" value="${U.esc(s.q)}"></div>`);
     const inp = UI.$('input', f);
@@ -41,10 +45,17 @@ Pages.contacts = (() => {
       if (s.q.trim()) { conds.push('(' + FIELDS.map(([k]) => `${k} LIKE ?`).join(' OR ') + ')'); args = args.concat(FIELDS.map(() => `%${s.q.trim()}%`)); }
       if (s.grp) { conds.push('grp=?'); args.push(s.grp); }
       where = conds.join(' AND ');
-      const rows = Cal.simpleList('contact', 'name', where, args);
+      const rows = Ord.applyListOrder('contact', Cal.simpleList('contact', 'name', where, args));
       box.innerHTML = rows.length ? `<div class="small muted">${rows.length}명</div><ul class="list">${rows.map(r => `<li class="tap" data-id="${r.id}"><div class="grow"><div class="main-t ellipsis">${U.esc(r.name)}${r.grp ? ` <span class="tiny muted">${U.esc(r.grp)}</span>` : ''}</div>
         <div class="sub ellipsis">${U.esc(r.mobile || r.tel1 || r.email || '')}</div></div></li>`).join('')}</ul>` : UI.empty(s.q ? '찾는 사람이 없어요' : `아직 등록한 ${lab.name ? '연락처' : ''}가 없어요`, 'a13');
       UI.on(box, 'li[data-id]', 'click', (e, li) => view(rows.find(r => r.id === Number(li.dataset.id))));
+      ordb.onclick = () => {
+        if (rows.length < 2) { UI.toast('순서를 바꿀 연락처가 2명 이상이어야 합니다'); return; }
+        UI.reorder({ title: '주소록 순서', hint: (s.q || s.grp ? '지금 보이는 사람들끼리의 순서입니다.\n' : '') + '새로 추가한 사람은 맨 아래에 붙습니다. PC판에서도 같은 순서로 보입니다.',
+          items: rows.map(r => ({ key: r.id, label: r.name, sub: [r.grp, r.mobile || r.tel1].filter(Boolean).join(' · ') })),
+          onSave: keys => { Ord.mergeListOrder('contact', rows.map(r => r.id), keys.map(Number)); App.dataChanged(); },
+          onReset: () => { Ord.mergeListOrder('contact', rows.map(r => r.id), null); App.dataChanged(); }, resetLabel: '이름순으로' });
+      };
     }
     draw();
     App.fab(() => edit(null), '연락처 추가');
@@ -91,19 +102,27 @@ Pages.contacts = (() => {
 Pages.diary = (() => {
   const t = U.parts(U.today());
   const s = { y: t[0], m: t[1], q: '' };
-  function render(c) {
+  function render(c, p, tools) {
     c.appendChild(UI.monthNav(s.y, s.m, (y, m) => { s.y = y; s.m = m; s.q = ''; App.render(); }));
     const f = UI.el(`<div class="row" style="margin-bottom:8px"><input class="inp grow" type="text" placeholder="제목·내용 찾기 (전체 기간)" value="${U.esc(s.q)}"></div>`);
     const inp = UI.$('input', f);
     inp.addEventListener('change', () => { s.q = inp.value.trim(); App.render(); });
     c.appendChild(f);
-    const rows = s.q ? Cal.simpleList('diary', 'date DESC, id DESC', 'title LIKE ? OR content LIKE ?', [`%${s.q}%`, `%${s.q}%`])
-      : Cal.simpleList('diary', 'date DESC, id DESC', 'substr(date,1,7)=?', [U.ym(s.y, s.m)]);
+    const rows = Ord.applyListOrder('diary', s.q ? Cal.simpleList('diary', 'date DESC, id DESC', 'title LIKE ? OR content LIKE ?', [`%${s.q}%`, `%${s.q}%`])
+      : Cal.simpleList('diary', 'date DESC, id DESC', 'substr(date,1,7)=?', [U.ym(s.y, s.m)]));
     if (!rows.length) c.appendChild(UI.el(UI.empty(s.q ? '찾는 일기가 없어요' : '이 달에 쓴 일기가 없어요', 'b33')));
     else {
       c.appendChild(UI.el(`<ul class="list">${rows.map(r => `<li class="tap" data-id="${r.id}"><div class="grow"><div class="main-t ellipsis">${U.esc(r.title || '(제목 없음)')}</div>
         <div class="sub ellipsis">${U.dateLabel(r.date)} · ${U.esc(U.WEATHER[r.weather] || '')} · ${U.esc((r.content || '').split('\n')[0].slice(0, 40))}</div></div></li>`).join('')}</ul>`));
       UI.on(c, 'li[data-id]', 'click', (e, li) => edit(rows.find(r => r.id === Number(li.dataset.id))));
+    }
+    if (rows.length > 1) {
+      const ordb = UI.el('<button class="btn sm">순서</button>');
+      ordb.onclick = () => UI.reorder({ title: '일기 순서', hint: `${s.q ? '찾은 일기' : `${s.m}월 일기`}끼리의 순서입니다. 새로 쓴 일기는 맨 아래에 붙습니다.`,
+        items: rows.map(r => ({ key: r.id, label: r.title || '(제목 없음)', sub: U.dateLabel(r.date) })),
+        onSave: keys => { Ord.mergeListOrder('diary', rows.map(r => r.id), keys.map(Number)); App.dataChanged(); },
+        onReset: () => { Ord.mergeListOrder('diary', rows.map(r => r.id), null); App.dataChanged(); }, resetLabel: '날짜순으로' });
+      tools.appendChild(ordb);
     }
     App.fab(() => edit(null), '일기 쓰기');
   }
@@ -123,7 +142,16 @@ Pages.diary = (() => {
 Pages.memo = (() => {
   const s = { q: '', order: 0 };
   const ORDERS = [['sort, id', '내가 정한 순서'], ['title, id', '제목순'], ['created DESC, id DESC', '최근 것 위로']];
-  function render(c) {
+  function render(c, p, tools) {
+    const ordb = UI.el('<button class="btn sm">순서</button>');
+    ordb.onclick = () => {
+      const all = Cal.simpleList('memo', 'sort, id');
+      if (all.length < 2) { UI.toast('메모가 2개 이상이어야 합니다'); return; }
+      UI.reorder({ title: '메모 순서', hint: "'내가 정한 순서'로 볼 때의 순서입니다. 새 메모는 맨 아래에 붙습니다.",
+        items: all.map(r => ({ key: r.id, label: r.title || (r.content || '').split('\n')[0].slice(0, 30) || '(빈 메모)', sub: r.created || '' })),
+        onSave: keys => { Ord.setMemoOrder(keys.map(Number)); s.order = 0; App.dataChanged(); } });
+    };
+    tools.appendChild(ordb);
     const f = UI.el(`<div class="row" style="margin-bottom:8px"><input class="inp grow" type="text" placeholder="찾을 글자" value="${U.esc(s.q)}">
       <select class="inp" style="width:auto">${ORDERS.map(([, l], i) => `<option value="${i}"${i === s.order ? ' selected' : ''}>${l}</option>`).join('')}</select></div>`);
     UI.$('input', f).addEventListener('change', e => { s.q = e.target.value.trim(); App.render(); });
@@ -176,6 +204,7 @@ Pages.help = {
       · 가계부 화면의 ＋ 버튼으로 입력합니다. 품목을 예전과 같게 쓰면 계정이 자동으로 골라집니다.<br>
       · 내역을 누르면 고치거나 지울 수 있습니다.<br>
       · 달력에서 날짜를 누르면 그날 일정과 내역을 봅니다.<br>
+      · ◀ 2026년 10월 ▾ ▶ 의 가운데 글자를 누르면 연·월을 바로 고를 수 있습니다.<br>
       · 매달 같은 수입·지출은 <b>예약 입력</b>에 등록하면 앱을 열 때 입력할지 물어봅니다.
       <div class="section-t">자료 보관</div>
       · 자료는 휴대폰 안에만 저장됩니다 (인터넷으로 보내지 않음).<br>

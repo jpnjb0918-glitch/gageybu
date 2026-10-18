@@ -187,9 +187,14 @@ Pages.settings = (() => {
   // ── 화면 꾸미기 (이 휴대폰에만 저장) ──
   function decoHtml() {
     return `<div class="form">
-      <div class="f"><label class="l">테마</label><select data-p="theme"><option value="retro">미니홈피 (2000년대 감성)</option><option value="basic">기본 (깔끔하게)</option></select></div>
+      <div class="f"><label class="l">테마</label><select data-p="theme"><option value="retro">미니홈피 (2000년대 감성)</option><option value="basic">기본 (깔끔하게)</option><option value="feed">피드 (사진 SNS 느낌)</option><option value="timeline">타임라인 (짧은 글 SNS 느낌, 밝게)</option><option value="timeline_dark">타임라인 (짧은 글 SNS 느낌, 어둡게)</option></select><div class="hint">피드·타임라인 테마는 휴대폰 기본 글꼴을 쓰고, 가계부 목록이 피드·타임라인 모양으로 바뀝니다. 기능은 같습니다.</div></div>
       <div class="f"><label class="l">글꼴</label><select data-p="font"><option value="pixel">도트 글꼴 (갈무리)</option><option value="system">휴대폰 기본 글꼴</option></select></div>
       <div class="f"><label class="l">글자 크기</label><select data-p="fontsize"><option value="s">작게</option><option value="m">보통</option><option value="l">크게</option><option value="xl">아주 크게</option></select></div>
+      <div class="f"><label class="l">순서</label><div class="row wrap"><button class="btn sm" data-ord="nav">메뉴 순서</button><button class="btn sm" data-ord="layout">가계부 화면 구성</button></div>
+        <div class="hint">메뉴: 위 4개가 아래 탭, 나머지는 더보기 화면 · 계정과목 순서는 장부·계정 → 계정과목에서</div></div>
+      <div class="f"><label class="l">이 테마의 색</label><div class="colors"></div>
+        <div class="row" style="margin-top:6px"><button class="btn sm" data-creset>이 테마 색 모두 처음으로</button></div>
+        <div class="hint">고른 색은 이 휴대폰의 지금 테마에만 쓰입니다. 나머지 색(테두리·흐린 글자 등)은 고른 색에 맞춰 자동으로 바뀝니다.</div></div>
       <label class="check"><input type="checkbox" data-p="marquee"> 전광판 (맨 위 흐르는 글자)</label>
       <div class="f"><label class="l">오늘의 기분</label><select data-p="mood">${App.MOODS.map(m => `<option>${U.esc(m)}</option>`).join('')}</select></div>
       <div class="f"><label class="l">한마디 (전광판에 나옴)</label><input type="text" data-p="motto" placeholder="오늘도 알뜰살뜰 (^-^)v"></div>
@@ -203,14 +208,41 @@ Pages.settings = (() => {
         App.setPref(k, x.type === 'checkbox' ? String(x.checked) : x.value);
         App.applyTheme();
         App.updateHeader();
+        if (k === 'theme') drawColors(c);
       });
     });
+    UI.$('[data-ord="nav"]', c).onclick = () => App.navReorderSheet();
+    UI.$('[data-ord="layout"]', c).onclick = () => App.layoutReorderSheet();
+    UI.$('[data-creset]', c).onclick = () => {
+      App.setPref('colors_' + App.theme(), null);
+      App.applyTheme();
+      App.updateHeader();
+      drawColors(c);
+      UI.toast('처음 색으로 되돌렸습니다');
+    };
+    drawColors(c);
     const cur = App.pref('minimi');
     UI.$$('[data-st]', c).forEach(b => b.classList.toggle('on', b.dataset.st === cur));
     UI.on(c, '[data-st]', 'click', (e, b) => {
       App.setPref('minimi', b.dataset.st);
       UI.$$('[data-st]', c).forEach(x => x.classList.toggle('on', x === b));
       App.updateHeader();
+    });
+  }
+  /** 지금 테마의 색 6가지 견본 (누르면 색 고르기) */
+  function drawColors(c) {
+    const box = UI.$('.colors', c);
+    if (!box) return;
+    const base = App.baseColors(), cu = App.customColors();
+    box.innerHTML = App.COLOR_KEYS.map(([k, label]) => {
+      const v = cu[k] || base[k];
+      return `<button class="csw${cu[k] ? ' changed' : ''}" data-ck="${k}"><span class="dot" style="background:${v}"></span><span class="nm">${U.esc(label)}</span><span class="hx">${v}${cu[k] ? ' ✎' : ''}</span></button>`;
+    }).join('');
+    UI.on(box, '[data-ck]', 'click', (e, b) => {
+      const k = b.dataset.ck, label = App.COLOR_KEYS.find(x => x[0] === k)[1];
+      UI.colorPicker({ title: `${label} 색`, value: App.customColors()[k] || App.baseColors()[k], original: App.baseColors()[k],
+        onPick: hex => { App.setCustomColor(k, hex); drawColors(c); },
+        onReset: () => { App.setCustomColor(k, null); drawColors(c); } });
     });
   }
   function infoHtml() {
@@ -228,15 +260,30 @@ Pages.settings = (() => {
 Pages.codes = (() => {
   function render(c) {
     const lid = App.lid;
-    c.appendChild(UI.el(`<div class="small muted" style="margin-bottom:6px">'${U.esc(App.ledgerName())}' 장부의 계정과목입니다. 계정코드 첫 글자가 대분류이고, 0으로 시작하면 수입입니다.</div>`));
+    c.appendChild(UI.el(`<div class="small muted" style="margin-bottom:6px">'${U.esc(App.ledgerName())}' 장부의 계정과목입니다. 계정코드 첫 글자가 대분류이고, 0으로 시작하면 수입입니다.
+      순서는 입력할 때 고르는 목록과 결산 보고서에 그대로 쓰이고, PC판에서도 같습니다.</div>`));
     const gs = L.groups(lid), cats = L.categories(lid);
+    const gb = UI.el('<div class="row" style="margin-bottom:6px"><button class="btn sm" data-gord>대분류 순서 바꾸기</button></div>');
+    c.appendChild(gb);
     let html = '';
     for (const g of gs) {
-      html += `<div class="dayhead tap" data-g="${U.esc(g.code)}"><span>(${U.esc(g.code)}) ${U.esc(g.name)}</span><span class="sums">대분류 편집 ›</span></div><ul class="list">`;
+      const n = cats.filter(x => x.code.slice(0, 1) === g.code).length;
+      html += `<div class="dayhead"><span class="tap" data-g="${U.esc(g.code)}">(${U.esc(g.code)}) ${U.esc(g.name)} <span class="small muted">편집 ›</span></span>
+        <span class="sums">${n > 1 ? `<button class="btn sm" data-cord="${U.esc(g.code)}">소분류 순서</button>` : ''}</span></div><ul class="list">`;
       html += cats.filter(x => x.code.slice(0, 1) === g.code).map(x => `<li class="tap" data-c="${U.esc(x.code)}"><span class="chip">${U.esc(x.code)}</span><div class="grow">${U.esc(x.name)}</div></li>`).join('');
       html += `<li class="tap muted" data-add="${U.esc(g.code)}">＋ 소분류 추가</li></ul>`;
     }
     c.appendChild(UI.el(`<div>${html}</div>`));
+    UI.$('[data-gord]', gb).onclick = () => UI.reorder({ title: '대분류 순서', items: L.groups(lid).map(g => ({ key: g.code, label: `(${g.code}) ${g.name}` })),
+      onSave: keys => { Ord.setGroupOrder(lid, keys); App.dataChanged(); },
+      onReset: () => { Ord.setGroupOrder(lid, []); App.dataChanged(); }, resetLabel: '코드 순으로' });
+    UI.on(c, '[data-cord]', 'click', (e, b) => {
+      const g = b.dataset.cord;
+      const list = L.categories(lid, g);
+      UI.reorder({ title: `소분류 순서 (${g})`, items: list.map(x => ({ key: x.code, label: `${x.code} ${x.name}` })),
+        onSave: keys => { Ord.setCategoryOrder(lid, keys); App.dataChanged(); },
+        onReset: () => { Ord.setCategoryOrder(lid, list.map(x => x.code).sort()); App.dataChanged(); }, resetLabel: '코드 순으로' });
+    });
     UI.on(c, '[data-g]', 'click', (e, x) => groupSheet(x.dataset.g));
     UI.on(c, '[data-c]', 'click', (e, x) => catSheet(x.dataset.c));
     UI.on(c, '[data-add]', 'click', (e, x) => addCat(x.dataset.add));

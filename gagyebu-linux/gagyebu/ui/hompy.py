@@ -28,7 +28,7 @@ class Backdrop(QWidget):
         p = QPainter(self)
         W, H = self.width(), self.height()
         p.fillRect(self.rect(), QColor(T.C['teal']))
-        dot = QColor('#3F8D8D')
+        dot = QColor(T.C['dot'])
         for y in range(8, H, 16):
             for x in range(8 + (8 if (y // 16) % 2 else 0), W, 16):
                 p.fillRect(x, y, 2, 2, dot)
@@ -346,6 +346,8 @@ def _dotted():
 
 def today_html(today_exp, month_exp):
     """싸이월드 'TODAY 12 | TOTAL 3456' 처럼 — 오늘 지출 | 이달 지출"""
-    return (f"<span style='color:{T.C['pink_dark']};font-weight:bold'>TODAY</span> {today_exp}"
-            f" <span style='color:{T.C['grey']}'>|</span> "
-            f"<span style='color:{T.C['teal_dark']};font-weight:bold'>이달</span> {month_exp}")
+    c = T.sns_colors()
+    a, sep, b = (c['accent'], c['muted'], c['accent']) if c else (T.C['pink_dark'], T.C['grey'], T.C['teal_dark'])
+    return (f"<span style='color:{a};font-weight:bold'>TODAY</span> {today_exp}"
+            f" <span style='color:{sep}'>|</span> "
+            f"<span style='color:{b};font-weight:bold'>이달</span> {month_exp}")

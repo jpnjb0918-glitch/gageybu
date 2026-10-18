@@ -1,0 +1,29 @@
+#pragma code_page(65001)
+#include <winver.h>
+
+1 ICON "gagyebu.ico"
+1 24 "app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @V1@,@V2@,@V3@,0
+ PRODUCTVERSION @V1@,@V2@,@V3@,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041204B0"
+    BEGIN
+      VALUE "FileDescription", "우리집 가계부"
+      VALUE "ProductName", "우리집 가계부 (윈도우판)"
+      VALUE "FileVersion", "@VERSION@"
+      VALUE "ProductVersion", "@VERSION@"
+      VALUE "OriginalFilename", "우리집가계부.exe"
+      VALUE "LegalCopyright", "개인 사용"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0412, 1200
+  END
+END

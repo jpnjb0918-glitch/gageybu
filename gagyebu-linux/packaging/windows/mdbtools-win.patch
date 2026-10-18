@@ -1,0 +1,82 @@
+--- a/configure.ac
++++ b/configure.ac
+@@ -86,7 +86,7 @@
+ CFLAGS="$CFLAGS -Wall -Werror"
+ LOCALE_T=locale_t
+ AS_CASE([$host],
+-        [*mingw*], [LDFLAGS="$LDFLAGS -no-undefined" LOCALE_T=_locale_t], [])
++        [*mingw*], [LOCALE_T=_locale_t], [])
+ AC_SUBST(LOCALE_T)
+ 
+ dnl See if iconv is present and wanted
+--- a/src/util/mdb-export.c
++++ b/src/util/mdb-export.c
+@@ -17,6 +17,10 @@
+  */
+ 
+ #include "mdbtools.h"
++#ifdef _WIN32
++#include <io.h>
++#include <fcntl.h>
++#endif
+ #include "mdbver.h"
+ 
+ #define EXPORT_BIND_SIZE 200000
+@@ -84,6 +88,9 @@
+ 
+ 	opt_context = g_option_context_new("<file> <table> - export data from MDB file");
+ 	g_option_context_add_main_entries(opt_context, entries, NULL /*i18n*/);
++#ifdef _WIN32
++	_setmode(_fileno(stdout), _O_BINARY);
++#endif
+ 	locale = setlocale(LC_CTYPE, "");
+ 	// g_option_context_set_strict_posix(opt_context, TRUE); /* options first, requires glib 2.44 */
+ 	if (!g_option_context_parse (opt_context, &argc, &argv, &error))
+@@ -185,6 +192,24 @@
+ 			exit(1);
+ 		}
+ 
++	if (table_name[0] == '#' && table_name[1]) {   /* gagyebu: "#N" = N번째(0부터) 사용자 표 */
++		int want = atoi(table_name + 1), k = 0;
++		unsigned int ci;
++		if (!mdb_read_catalog(mdb, MDB_ANY)) {
++			fputs("Error: cannot read catalog\n", stderr);
++			exit(1);
++		}
++		for (ci = 0; ci < mdb->num_catalog; ci++) {
++			MdbCatalogEntry *e = g_ptr_array_index(mdb->catalog, ci);
++			if (e->object_type != MDB_TABLE || mdb_is_system_table(e))
++				continue;
++			if (k++ == want) {
++				g_free(table_name);
++				table_name = g_strdup(e->object_name);
++				break;
++			}
++		}
++	}
+ 	table = mdb_read_table_by_name(mdb, table_name, MDB_TABLE);
+ 	if (!table) {
+ 		fprintf(stderr, "Error: Table %s does not exist in this database.\n", table_name);
+--- a/src/util/mdb-tables.c
++++ b/src/util/mdb-tables.c
+@@ -19,6 +19,10 @@
+ /* this utility dumps the schema for an existing database */
+ 
+ #include "mdbtools.h"
++#ifdef _WIN32
++#include <io.h>
++#include <fcntl.h>
++#endif
+ #include "mdbver.h"
+ 
+ struct type_struct {
+@@ -103,6 +107,9 @@
+ 	opt_context = g_option_context_new("<file> - show MDB files tables/entries");
+ 	g_option_context_add_main_entries(opt_context, entries, NULL /*i18n*/);
+ 	// g_option_context_set_strict_posix(opt_context, TRUE); /* options first, requires glib 2.44 */
++#ifdef _WIN32
++	_setmode(_fileno(stdout), _O_BINARY);
++#endif
+ 	locale = setlocale(LC_CTYPE, "");
+ 	if (!g_option_context_parse (opt_context, &argc, &argv, &error))
+ 	{

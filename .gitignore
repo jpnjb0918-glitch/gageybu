@@ -1,0 +1,29 @@
+# ── 서명 키·암호: 절대 올리지 않음 (따로 보관) ──
+*.jks
+*.keystore
+*.p12
+keystore-password.txt
+
+# ── 빌드 결과물: 저장소 대신 GitHub Releases 에 올림 ──
+dist/
+dist-windows/
+*.apk
+*.idsig
+*.deb
+*.rpm
+*.exe
+*.zip
+*.tar.gz
+
+# ── 개인 가계부 자료 파일: 실수로 올라가지 않게 ──
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.mdb
+
+# ── 파이썬·노드·시험 출력 ──
+__pycache__/
+*.pyc
+node_modules/
+gagyebu-android/devtools/shots/
+gagyebu-android/devtools/compat/out/

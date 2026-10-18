@@ -20,12 +20,20 @@
 
 서명 키가 없는 곳에서 `build-apk.sh`를 돌리면 새 키를 만듭니다. 그 APK는 이미 설치된 앱 위에 덮어 설치되지 않으니, 업데이트용 APK는 원래 키가 있는 곳에서 만드세요.
 
-## GitHub Actions 로 APK 만들기 (`.github/workflows/android-apk.yml`)
+## GitHub Actions 로 배포 파일 만들기
 
-| 언제 | 결과 |
-|---|---|
-| `main`에 `gagyebu-android/` 변경을 올릴 때, 또는 Actions 화면에서 **Run workflow** | 그 실행 화면의 **Artifacts**에 APK |
-| `android-v<버전>` 릴리스를 **Publish** 할 때 | 그 릴리스에 APK와 설치·사용 가이드가 붙음 |
+| 작업 | 언제 | 결과 |
+|---|---|---|
+| 안드로이드 APK (`android-apk.yml`) | `main`에 `gagyebu-android/` 변경을 올릴 때 | **Artifacts**에 APK |
+| | `android-v<버전>` 릴리스를 **Publish** 할 때 | 그 릴리스에 APK·가이드 |
+| PC판 (`pc-packages.yml`) | `main`에 `gagyebu-linux/` 변경을 올릴 때 | **Artifacts**에 deb·rpm·윈도우 설치 프로그램·휴대용 zip |
+| | `linux-v<버전>` 릴리스를 **Publish** 할 때 | 그 릴리스에 위 파일·사용가이드 |
+| 둘 다 | Actions 화면에서 **Run workflow** | 태그를 넣으면 그 릴리스에 다시 붙임, 비우면 빌드만 |
+
+- **첨부 파일 이름**: GitHub이 한글 파일 이름을 바꿔 버려서 영문 이름(`gagyebu-…`)으로 붙이고, 화면에 보이는 이름표를 한글로 붙입니다.
+- **다시 붙일 때**: 그 릴리스의 기존 첨부 파일을 지우고 새로 붙입니다.
+
+### 안드로이드 APK 서명
 
 - **필요한 저장소 시크릿**: `ANDROID_KEYSTORE_BASE64`(서명 키를 base64로 바꾼 한 줄), `ANDROID_KEYSTORE_PASSWORD`(키 암호 첫 줄)
 - **멈추는 경우**

@@ -14,9 +14,14 @@ B="$OUT/build"
 mkdir -p "$B"
 
 echo "[1/6] PyQt6 윈도우 휠 받기"
+# 1.1.1 배포판을 만든 버전으로 고정 (바꾸려면 환경변수로)
+PYQT6_VERSION="${PYQT6_VERSION:-6.11.0}"
+PYQT6_QT6_VERSION="${PYQT6_QT6_VERSION:-6.11.2}"
+PYQT6_SIP_VERSION="${PYQT6_SIP_VERSION:-13.13.0}"
 mkdir -p "$B/wheels"
 ls "$B"/wheels/pyqt6-*.whl >/dev/null 2>&1 || python3 -m pip download -q --no-deps --only-binary=:all: \
-    --platform win_amd64 --python-version 3.12 --implementation cp -d "$B/wheels" PyQt6 PyQt6-Qt6 PyQt6-sip
+    --platform win_amd64 --python-version 3.12 --implementation cp -d "$B/wheels" \
+    "PyQt6==$PYQT6_VERSION" "PyQt6-Qt6==$PYQT6_QT6_VERSION" "PyQt6-sip==$PYQT6_SIP_VERSION"
 ls "$B/wheels"
 
 echo "[2/6] mdbtools 윈도우판"

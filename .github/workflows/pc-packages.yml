@@ -1,0 +1,147 @@
+# PC판(리눅스 deb·rpm, 윈도우 설치 프로그램·휴대용 zip)을 GitHub 에서 만든다.
+# 언제 도나:
+#   - main 에 gagyebu-linux/ 변경이 올라올 때 → Actions 화면의 Artifacts 에 파일
+#   - linux-v<버전> 릴리스를 Publish 할 때 → 그 릴리스에 파일을 붙임
+#   - Actions 화면의 Run workflow → 태그를 넣으면 그 릴리스에 다시 붙임, 비우면 빌드만
+# 릴리스 첨부 파일은 이 작업이 관리한다 (붙이기 전에 그 릴리스의 기존 첨부를 지움).
+# GitHub 은 첨부 파일 이름의 한글을 바꿔 버리므로 파일 이름은 영문, 화면 표시 이름(label)은 한글로 붙인다.
+name: PC판 (리눅스·윈도우)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '이미 있는 릴리스에 다시 붙일 태그 (예: linux-v1.1.1). 비우면 빌드만'
+        required: false
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - 'gagyebu-linux/**'
+      - '.github/workflows/pc-packages.yml'
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  # 1.1.1 배포판을 만든 임베디드 파이썬 (python.org) 과 그 SHA-256
+  PYTHON_EMBED_URL: https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip
+  PYTHON_EMBED_SHA256: 4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3
+
+jobs:
+  linux:
+    # android-v... 릴리스에는 돌지 않음
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'linux-v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || '' }}
+
+      - name: 태그와 프로그램 버전이 같은지
+        if: env.TAG != ''
+        run: |
+          VER="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' gagyebu-linux/gagyebu/__init__.py)"
+          if [ "$TAG" != "linux-v$VER" ]; then
+            echo "::error::태그 $TAG 와 gagyebu/__init__.py 의 __version__ $VER 이 다릅니다"
+            exit 1
+          fi
+
+      - name: deb·rpm 만들기
+        run: |
+          command -v dpkg-deb && command -v cargo
+          bash gagyebu-linux/packaging/build-packages.sh "$RUNNER_TEMP/pc"
+          VER="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' gagyebu-linux/gagyebu/__init__.py)"
+          mkdir -p "$RUNNER_TEMP/up"
+          cp "$RUNNER_TEMP/pc/gagyebu-linux_${VER}_all.deb" "$RUNNER_TEMP/pc/gagyebu-linux-${VER}-1.noarch.rpm" "$RUNNER_TEMP/up/"
+          dpkg-deb --info "$RUNNER_TEMP/up/gagyebu-linux_${VER}_all.deb" | sed -n '1,/^ Description/p'
+          ls -la "$RUNNER_TEMP/up"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pc-linux
+          path: ${{ runner.temp }}/up/*
+          if-no-files-found: error
+
+  windows:
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'linux-v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || '' }}
+
+      - name: 태그와 프로그램 버전이 같은지
+        if: env.TAG != ''
+        run: |
+          VER="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' gagyebu-linux/gagyebu/__init__.py)"
+          if [ "$TAG" != "linux-v$VER" ]; then
+            echo "::error::태그 $TAG 와 gagyebu/__init__.py 의 __version__ $VER 이 다릅니다"
+            exit 1
+          fi
+
+      - name: 도구 설치 (mingw-w64, nsis, mdbtools 소스용 deb-src)
+        run: |
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          if grep -q '^deb ' /etc/apt/sources.list 2>/dev/null; then
+            sed -n 's/^deb /deb-src /p' /etc/apt/sources.list | sudo tee /etc/apt/sources.list.d/deb-src.list >/dev/null
+          fi
+          sudo apt-get update -q
+          sudo apt-get install -y -q mingw-w64 win-iconv-mingw-w64-dev nsis zip python3-pil \
+               autoconf automake libtool bison flex pkg-config dpkg-dev
+
+      - name: 임베디드 파이썬 받기 (SHA-256 확인)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/python-embed.zip" "$PYTHON_EMBED_URL"
+          echo "$PYTHON_EMBED_SHA256  $RUNNER_TEMP/python-embed.zip" | sha256sum -c -
+
+      - name: 윈도우판 만들기
+        run: |
+          bash gagyebu-linux/packaging/windows/build-windows.sh "$RUNNER_TEMP/python-embed.zip" "$RUNNER_TEMP/win"
+          VER="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' gagyebu-linux/gagyebu/__init__.py)"
+          mkdir -p "$RUNNER_TEMP/up"
+          cp "$RUNNER_TEMP/win/우리집가계부-윈도우판-$VER-setup.exe" "$RUNNER_TEMP/up/gagyebu-windows-$VER-setup.exe"
+          cp "$RUNNER_TEMP/win/우리집가계부-윈도우판-$VER-휴대용.zip" "$RUNNER_TEMP/up/gagyebu-windows-$VER-portable.zip"
+          ls -la "$RUNNER_TEMP/up"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pc-windows
+          path: ${{ runner.temp }}/up/*
+          if-no-files-found: error
+
+  release:
+    needs: [linux, windows]
+    if: github.event_name == 'release' || inputs.tag != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || '' }}
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/art
+
+      - name: 릴리스에 붙이기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' gagyebu-linux/gagyebu/__init__.py)"
+          A="$RUNNER_TEMP/art"
+          cp gagyebu-linux/사용가이드.txt "$RUNNER_TEMP/gagyebu-pc-guide-$VER.txt"
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | while IFS= read -r n; do
+            [ -n "$n" ] && gh release delete-asset "$TAG" "$n" -y -R "$GITHUB_REPOSITORY"
+          done
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber \
+            "$A/pc-windows/gagyebu-windows-$VER-setup.exe#윈도우판 $VER 설치 프로그램 (setup.exe)" \
+            "$A/pc-windows/gagyebu-windows-$VER-portable.zip#윈도우판 $VER 휴대용 (압축 풀어 실행)" \
+            "$A/pc-linux/gagyebu-linux_${VER}_all.deb#리눅스판 $VER deb (쿠분투·우분투·데비안)" \
+            "$A/pc-linux/gagyebu-linux-${VER}-1.noarch.rpm#리눅스판 $VER rpm (페도라 계열)" \
+            "$RUNNER_TEMP/gagyebu-pc-guide-$VER.txt#사용가이드.txt"
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[] | "\(.name)  \(.size)"'

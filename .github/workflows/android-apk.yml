@@ -4,12 +4,19 @@
 #   ANDROID_KEYSTORE_PASSWORD : keystore-password.txt 의 첫 줄
 # 언제 도나:
 #   - main 에 gagyebu-android/ 변경이 올라올 때 → Actions 화면의 Artifacts 에 APK
-#   - Actions 화면에서 Run workflow 를 누를 때 → 위와 같음
 #   - android-v<버전> 릴리스를 Publish 할 때 → 그 릴리스에 APK·가이드를 붙임
+#   - Actions 화면의 Run workflow → 태그를 넣으면 그 릴리스에 다시 붙임, 비우면 빌드만
+# 릴리스 첨부 파일은 이 작업이 관리한다 (붙이기 전에 그 릴리스의 기존 첨부를 지움).
+# GitHub 은 첨부 파일 이름의 한글을 바꿔 버리므로 파일 이름은 영문, 화면 표시 이름(label)은 한글로 붙인다.
 name: 안드로이드 APK
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '이미 있는 릴리스에 다시 붙일 태그 (예: android-v1.0.0). 비우면 빌드만'
+        required: false
+        default: ''
   push:
     branches: [main]
     paths:
@@ -29,13 +36,14 @@ jobs:
     env:
       # 1.0.0 APK 서명 인증서의 SHA-256 (공개값). 다른 키로 서명되면 휴대폰에 덮어 설치가 안 되므로 실패시킨다.
       EXPECTED_CERT_SHA256: 872f5656ad00593f6d589b46c2f0b6dbc237067263b7589a6e7d9c2020ef964b
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || '' }}
 
       - name: 릴리스 태그와 앱 버전이 같은지
-        if: github.event_name == 'release'
-        env:
-          TAG: ${{ github.event.release.tag_name }}
+        if: env.TAG != ''
         run: |
           VER="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' gagyebu-android/app/AndroidManifest.xml)"
           if [ "$TAG" != "android-v$VER" ]; then
@@ -94,10 +102,17 @@ jobs:
           if-no-files-found: error
 
       - name: 릴리스에 APK·가이드 붙이기
-        if: github.event_name == 'release'
+        if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
         run: |
-          gh release upload "$TAG" gagyebu-android/dist/*.apk "gagyebu-android/안드로이드_설치·사용가이드.md" \
-            --clobber -R "$GITHUB_REPOSITORY"
+          VER="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' gagyebu-android/app/AndroidManifest.xml)"
+          cp gagyebu-android/dist/*.apk "$RUNNER_TEMP/gagyebu-android-$VER.apk"
+          cp "gagyebu-android/안드로이드_설치·사용가이드.md" "$RUNNER_TEMP/gagyebu-android-guide-$VER.md"
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | while IFS= read -r n; do
+            [ -n "$n" ] && gh release delete-asset "$TAG" "$n" -y -R "$GITHUB_REPOSITORY"
+          done
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber \
+            "$RUNNER_TEMP/gagyebu-android-$VER.apk#안드로이드판 $VER (APK)" \
+            "$RUNNER_TEMP/gagyebu-android-guide-$VER.md#안드로이드 설치·사용 가이드"
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[] | "\(.name)  \(.size)"'

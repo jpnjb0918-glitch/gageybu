@@ -4,8 +4,8 @@
 
 | 폴더 | 내용 | 버전 |
 |---|---|---|
-| [`gagyebu-linux/`](gagyebu-linux/README.md) | PC판 (파이썬·PyQt6) — 리눅스 deb/rpm, 윈도우 설치 프로그램 | 1.6.0 |
-| [`gagyebu-android/`](gagyebu-android/README.md) | 안드로이드판 (웹 화면 + 자바) — APK | 1.5.0 |
+| [`gagyebu-linux/`](gagyebu-linux/README.md) | PC판 (파이썬·PyQt6) — 리눅스 deb/rpm, 윈도우 설치 프로그램 | 1.6.1 |
+| [`gagyebu-android/`](gagyebu-android/README.md) | 안드로이드판 (웹 화면 + 자바) — APK | 1.5.1 |
 
 두 폴더는 나란히 있어야 합니다. 안드로이드판 호환 시험(`gagyebu-android/devtools/compat/run.py`)이 `../gagyebu-linux`의 PC판 코드로 계산 결과를 비교합니다.
 

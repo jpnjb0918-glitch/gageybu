@@ -447,7 +447,22 @@ const UI = (() => {
     return sheet({ title: opts.title, body, buttons });
   }
 
-  return { $, $$, el, on, sticker, money, moneyCls, toast, sheet, closeTop, isOpen, alert: alertBox, confirm,
+  /** 표 상자: <table> HTML → 머리줄·첫 칸이 붙어 있는 스크롤 상자. 옆으로 더 있으면 오른쪽 끝에 그늘 + '옆으로 밀어 보기' */
+  function tableBox(tableHtml) {
+    const box = el(`<div class="tbox"><div class="tbox-hint" hidden>← 옆으로 밀면 더 있어요 →</div><div class="tablewrap">${tableHtml}</div></div>`);
+    const wrap = box.querySelector('.tablewrap'), hint = box.querySelector('.tbox-hint');
+    const upd = () => {
+      const wide = wrap.scrollWidth > wrap.clientWidth + 2;
+      hint.hidden = !wide;
+      box.classList.toggle('more', wide && wrap.scrollLeft + wrap.clientWidth < wrap.scrollWidth - 2);
+    };
+    wrap.addEventListener('scroll', upd, { passive: true });
+    requestAnimationFrame(upd);
+    box.update = upd;
+    return box;
+  }
+
+  return { $, $$, el, on, sticker, money, moneyCls, toast, sheet, closeTop, isOpen, alert: alertBox, confirm, tableBox,
     formHtml, form, readForm, formSheet, bindMoney, codeOptions, monthNav, yearNav, monthPicker, seg, dialog, empty, reorder, colorPicker, icon, ICONS,
     normHex, hexToHsl, hslToHex };
 })();

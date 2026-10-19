@@ -314,14 +314,14 @@ class ProfilePanel(QFrame):
 
     def set_numbers(self, ledger, bal, inc, exp):
         t = dt.date.today()
-        pink, teal = T.C['pink_dark'], T.C['teal_dark']
+        tn, teal = T.tone(), T.C['teal_dark']          # 수입·지출은 표와 같은 색, 금액은 굵게
         self.info.setText(
             f"<div style='line-height:150%'>"
             f"◈ {t:%Y.%m.%d} ({WEEK[t.weekday()]})<br>"
             f"<b>♡ {_esc(ledger)}</b><br>"
             f"♥ 잔액 <b style='color:{teal}'>{bal}</b>원<br>"
-            f"♥ 이달 수입 <span style='color:#1d5fbf'>{inc}</span>원<br>"
-            f"♥ 이달 지출 <span style='color:{pink}'>{exp}</span>원</div>")
+            f"♥ 이달 수입 <b style='color:{tn['in']}'>{inc}</b>원<br>"
+            f"♥ 이달 지출 <b style='color:{tn['out']}'>{exp}</b>원</div>")
 
 
 def _esc(s):

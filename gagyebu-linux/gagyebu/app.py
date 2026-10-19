@@ -122,9 +122,11 @@ class MainWindow(QMainWindow):
         from .ui.settings_page import SettingsPage
         from .ui.update_ui import Updater
         self.updater = Updater(self)                  # 새 버전 확인·내려받기·설치 (설정 → 업데이트 탭도 씀)
-        self.pages = [LedgerPage(self), SearchPage(self), ReportsPage(self), GraphPage(self), RecurringPage(self),
-                      AssetsPage(self), CalendarPage(self), AddressPage(self), DiaryPage(self), MemoPage(self),
-                      SettingsPage(self)]
+        # 화면은 처음 열 때 만듦 (켤 때·테마 바꿀 때 안 쓰는 화면 위젯 1,400여 개까지 꾸미느라 몇 초씩 걸리던 것)
+        self.page_classes = [LedgerPage, SearchPage, ReportsPage, GraphPage, RecurringPage, AssetsPage, CalendarPage,
+                             AddressPage, DiaryPage, MemoPage, SettingsPage]
+        self.pages = _LazyPages(self)
+        self.dirty = set()
         self.nav = QListWidget()
         self.nav.setObjectName('TabNav')
         self.nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -132,12 +134,11 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.nav_order = list(range(len(self.pages)))      # 메뉴 줄 번호 → 화면 번호 (메뉴 순서는 바꿀 수 있음)
         self.apply_nav_order(select=False)
-        for p in self.pages:
-            # 화면이 좁으면 창이 화면 밖으로 넘치지 않고 그 화면만 스크롤되게
+        for _cls in self.page_classes:
+            # 화면이 좁으면 창이 화면 밖으로 넘치지 않고 그 화면만 스크롤되게 (화면은 처음 열 때 넣음)
             sa = QScrollArea()
             sa.setWidgetResizable(True)
             sa.setFrameShape(QFrame.Shape.NoFrame)
-            sa.setWidget(p)
             self.stack.addWidget(sa)
         self.nav.currentRowChanged.connect(self._page_changed)
 
@@ -319,7 +320,7 @@ class MainWindow(QMainWindow):
         cur = self.nav.currentRow()
         for row in range(self.nav.count()):
             it = self.nav.item(row)
-            name = type(self.pages[self.nav_order[row]]).__name__
+            name = self.page_classes[self.nav_order[row]].__name__
             if c:
                 on = row == cur
                 ic = QIcon()
@@ -344,11 +345,11 @@ class MainWindow(QMainWindow):
         """메뉴 폭: 기본 폭, 글자를 크게 하면 가장 긴 메뉴 이름이 다 보이게 넓힘"""
         self.nav.ensurePolished()
         fm = self.nav.fontMetrics()
-        return max(base, max(fm.horizontalAdvance(p.title) for p in self.pages) + pad)
+        return max(base, max(fm.horizontalAdvance(c.title) for c in self.page_classes) + pad)
 
     def apply_nav_order(self, select=True):
         """설정의 메뉴 순서대로 왼쪽(오른쪽) 메뉴를 다시 채움. 첫 줄이 처음 화면."""
-        names = [type(p).__name__ for p in self.pages]
+        names = [c.__name__ for c in self.page_classes]
         order = [names.index(n) for n in TH.nav_order() if n in names]
         order += [i for i in range(len(self.pages)) if i not in order]
         cur = self.nav_order[self.nav.currentRow()] if 0 <= self.nav.currentRow() < len(self.nav_order) else None
@@ -356,7 +357,7 @@ class MainWindow(QMainWindow):
         self.nav.blockSignals(True)
         self.nav.clear()
         for i in order:
-            self.nav.addItem(QListWidgetItem(self.pages[i].title))
+            self.nav.addItem(QListWidgetItem(self.page_classes[i].title))
         self.nav.blockSignals(False)
         if select and cur is not None:
             self.nav.setCurrentRow(order.index(cur))
@@ -440,7 +441,7 @@ class MainWindow(QMainWindow):
 
     def reset_edit_state(self):
         """장부를 바꾸거나 DB를 교체하면 각 화면의 '수정 중' 상태를 지움 (다른 장부 내역을 덮어쓰지 않게)."""
-        for p in self.pages:
+        for p in self.pages.made():                 # 아직 안 만든 화면은 지울 상태도 없음
             if hasattr(p, 'reset_state'):
                 p.reset_state()
 
@@ -471,8 +472,8 @@ class MainWindow(QMainWindow):
         theme = TH.current()[0]
         lay_ = TH.layout_of(theme)
         # 피드의 가계부 화면은 프로필 머리가 제목 대신, 그 밖의 SNS 화면은 위에 화면 이름
-        self.sns_title.setVisible(bool(lay_) and not (lay_ == 'feed' and type(self.pages[i]).__name__ == 'LedgerPage'))
-        self.sns_title.setText(self.pages[i].title)
+        self.sns_title.setVisible(bool(lay_) and not (lay_ == 'feed' and self.page_classes[i].__name__ == 'LedgerPage'))
+        self.sns_title.setText(self.page_classes[i].title)
         if lay_:
             self._nav_icons(theme)
         if i in self.dirty:
@@ -480,10 +481,10 @@ class MainWindow(QMainWindow):
             self.pages[i].refresh()
 
     def goto(self, page_cls_name):
-        for i, p in enumerate(self.pages):
-            if type(p).__name__ == page_cls_name:
+        for i, c in enumerate(self.page_classes):
+            if c.__name__ == page_cls_name:
                 self.nav.setCurrentRow(self.nav_order.index(i))
-                return p
+                return self.pages[i]
 
     # ── DB 교체 (가져오기·복원) ──
     def replace_db(self, new_path):
@@ -577,6 +578,30 @@ def install_error_dialog():
         except Exception:
             pass
     sys.excepthook = hook
+
+
+class _LazyPages:
+    """화면 목록: 번호로 꺼낼 때 처음이면 그 화면을 만들어 자리(스크롤 영역)에 넣음. 돌면(for) 모든 화면을 만듦."""
+    def __init__(self, win):
+        self.win, self.items = win, [None] * len(win.page_classes)
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, i):
+        if self.items[i] is None:
+            p = self.win.page_classes[i](self.win)
+            self.items[i] = p
+            self.win.stack.widget(i).setWidget(p)
+            self.win.dirty.add(i)                       # 처음 열면 내용을 채움
+        return self.items[i]
+
+    def __iter__(self):
+        return (self[i] for i in range(len(self)))
+
+    def made(self):
+        """이미 만든 화면만"""
+        return [p for p in self.items if p is not None]
 
 
 def main(argv=None):

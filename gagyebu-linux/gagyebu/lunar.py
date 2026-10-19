@@ -4,7 +4,7 @@ from functools import lru_cache
 
 from .vendor.korean_lunar_calendar import KoreanLunarCalendar
 
-MIN_YEAR, MAX_YEAR = 1000, 2050
+# 변환할 수 있는 해: 1000~2050 (데이터 범위)
 
 
 @lru_cache(maxsize=4096)

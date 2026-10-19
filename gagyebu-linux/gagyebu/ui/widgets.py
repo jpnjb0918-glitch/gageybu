@@ -2,12 +2,13 @@
 import datetime as dt
 import html
 
-from PyQt6.QtCore import QDate, QEvent, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QTextDocument
-from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox,
-                             QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-                             QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTreeWidget,
-                             QTreeWidgetItem, QVBoxLayout, QWidget)
+from PyQt6.QtCore import QDate, QEvent, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFontMetrics, QIcon, QPalette, QTextDocument
+from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateEdit, QDialog,
+                             QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+                             QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QStyle, QStyledItemDelegate,
+                             QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem,
+                             QVBoxLayout, QWidget)
 
 from ..services import ledger as L
 from ..services.backup import write_csv
@@ -20,14 +21,37 @@ INCOME_COLOR = QColor('#1d5fbf')
 EXPENSE_COLOR = QColor('#b8322a')
 SUBTOTAL_BG = QColor('#fdf1e3')
 FOOTER_BG = QColor('#ece8f6')
+ZERO_COLOR = QColor('#b5b5b5')        # 0 원은 흐리게 — 진짜 금액이 눈에 먼저 들어오게
+GROUP_BG = QColor('#dff5f2')          # 결산 보고서 대분류 칸
+SEP_COLOR = QColor('#5cc6c6')         # 결산 보고서 대분류끼리 나누는 굵은 선
 ID_ROLE = Qt.ItemDataRole.UserRole
+CELL_PAD = 4                          # 스타일 기본 여백에 더하는 칸 양옆 여백 (금액이 칸 끝에 붙지 않게)
 
 
 def retheme(t):
     """테마가 바뀌면 표 글자·배경색을 그 자리에서 바꿈 (다른 모듈이 가져다 쓴 같은 QColor 객체도 함께 바뀜).
-    t: theme.tone() 의 결과"""
-    for obj, key in ((INCOME_COLOR, 'in'), (EXPENSE_COLOR, 'out'), (SUBTOTAL_BG, 'subtotal_bg'), (FOOTER_BG, 'footer_bg')):
+    t: theme.tone() 의 결과. 글꼴이 바뀌었을 수 있으니 표 줄 높이도 다시 맞춤"""
+    for obj, key in ((INCOME_COLOR, 'in'), (EXPENSE_COLOR, 'out'), (SUBTOTAL_BG, 'subtotal_bg'), (FOOTER_BG, 'footer_bg'),
+                     (ZERO_COLOR, 'zero'), (GROUP_BG, 'group_bg'), (SEP_COLOR, 'sep')):
         obj.setRgba(QColor(t[key]).rgba())
+    _protos.clear()                   # 본보기 칸의 굵은 글꼴은 그때 글꼴로 만들어졌으므로 (글꼴이 바뀌었을 수 있음)
+    app = QApplication.instance()
+    if app is not None and not getattr(app, '_gb_protos_hook', False):
+        app.aboutToQuit.connect(_protos.clear)      # 끝낼 때 본보기 칸(글꼴)을 Qt 보다 먼저 정리
+        app._gb_protos_hook = True
+    for w in (app.allWidgets() if app else []):
+        if isinstance(w, QTableWidget) and w.property('gbTable'):
+            fit_rows(w)
+            w.viewport().update()
+
+
+def set_tone(label, kind=''):
+    """안내 글 색을 테마에 맞게: 'note' = 흐린 안내(테마의 보조 글자색), 'warn' = 주의(지출색·굵게), '' = 보통.
+    색을 글자에 박아 두지 않아 어두운 테마에서도 읽힘 (theme.py 의 QLabel[tone=...] 규칙)"""
+    label.setProperty('tone', kind)
+    label.style().unpolish(label)
+    label.style().polish(label)
+    return label
 
 
 # ── 입력 위젯 ───────────────────────────────────────────
@@ -58,6 +82,17 @@ class DateEdit(QDateEdit):
         self.setCalendarPopup(True)
         self.setDisplayFormat('yyyy-MM-dd')
         self.set_date(d or dt.date.today())
+        self._fit()
+
+    def _fit(self):
+        """날짜 글자가 다 보이는 폭 이하로 줄어들지 않게 (좁은 칸에서 '2026-10-1' 처럼 잘리던 것)"""
+        # 글자 폭 + 테두리·안쪽 여백·펼침 단추 몫 (SNS 테마는 여백이 넓어 크기 힌트만으로는 끝 글자가 잘렸음)
+        self.setMinimumWidth(QFontMetrics(self.font()).horizontalAdvance('2026-10-30') + 62)
+
+    def changeEvent(self, ev):
+        super().changeEvent(ev)
+        if ev.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._fit()
 
     def date_(self):
         q = self.date()
@@ -137,8 +172,47 @@ def button(text, slot=None, tip=None):
 
 
 # ── 표 ─────────────────────────────────────────────────
+class CellDelegate(QStyledItemDelegate):
+    """표 칸 그리기: 글자 양옆 여백을 넉넉히(칸 폭도 그만큼 넓게), 밝은 선택색이면 고른 줄에서도 수입·지출·0 색을 그대로.
+    배경·선택·체크 표시는 스타일이 그리고 글자만 직접 그린다."""
+    def sizeHint(self, opt, idx):
+        s = super().sizeHint(opt, idx)
+        return QSize(s.width() + 2 * CELL_PAD, s.height())
+
+    def paint(self, p, opt, idx):
+        o = QStyleOptionViewItem(opt)
+        self.initStyleOption(o, idx)
+        w = o.widget
+        st = w.style() if w is not None else QApplication.style()
+        text = o.text.replace('\n', ' ')
+        r = st.subElementRect(QStyle.SubElement.SE_ItemViewItemText, o, w).adjusted(CELL_PAD, 0, -CELL_PAD, 0)
+        o.text = ''
+        st.drawControl(QStyle.ControlElement.CE_ItemViewItem, o, p, w)
+        if not text:
+            return
+        cg = (QPalette.ColorGroup.Disabled if not (o.state & QStyle.StateFlag.State_Enabled)
+              else QPalette.ColorGroup.Normal if o.state & QStyle.StateFlag.State_Active else QPalette.ColorGroup.Inactive)
+        role = QPalette.ColorRole.Text
+        if o.state & QStyle.StateFlag.State_Selected:
+            light = o.palette.color(cg, QPalette.ColorRole.Highlight).lightness() >= 170
+            if not (light and idx.data(Qt.ItemDataRole.ForegroundRole) is not None):
+                role = QPalette.ColorRole.HighlightedText
+        p.save()
+        p.setFont(o.font)
+        p.setPen(o.palette.color(cg, role))
+        p.drawText(r, o.displayAlignment.value, o.fontMetrics.elidedText(text, Qt.TextElideMode.ElideRight, r.width()))
+        p.restore()
+
+
+def fit_rows(t):
+    """줄 높이를 글자 크기에 맞춰 넉넉히 (글자 키 + 위아래 여백)"""
+    t.verticalHeader().setDefaultSectionSize(max(26, QFontMetrics(t.font()).height() + 11))
+
+
 def make_table(headers, stretch=None, multi=False):
     t = QTableWidget(0, len(headers))
+    t.setProperty('gbTable', True)
+    t.setItemDelegate(CellDelegate(t))
     t.setHorizontalHeaderLabels(headers)
     t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
     t.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection if multi
@@ -146,7 +220,7 @@ def make_table(headers, stretch=None, multi=False):
     t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     t.setAlternatingRowColors(True)
     t.verticalHeader().setVisible(False)
-    t.verticalHeader().setDefaultSectionSize(24)
+    fit_rows(t)
     hh = t.horizontalHeader()
     hh.setHighlightSections(False)
     hh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -155,17 +229,26 @@ def make_table(headers, stretch=None, multi=False):
     return t
 
 
+_protos = {}       # 모양(정렬·글자색·배경·굵게)별 본보기 칸 — 복제가 칸마다 설정하는 것보다 4배쯤 빠름 (1만 줄 표)
+
+
 def cell(text='', align=LEFT, color=None, bg=None, bold=False, data=None):
-    it = QTableWidgetItem('' if text is None else str(text))
-    it.setTextAlignment(align)
-    if color is not None:
-        it.setForeground(color)
-    if bg is not None:
-        it.setBackground(bg)
-    if bold:
-        f = it.font()
-        f.setBold(True)
-        it.setFont(f)
+    key = (align, None if color is None else color.rgba(), None if bg is None else bg.rgba(), bold)
+    proto = _protos.get(key)
+    if proto is None:
+        proto = QTableWidgetItem()
+        proto.setTextAlignment(align)
+        if color is not None:
+            proto.setForeground(color)
+        if bg is not None:
+            proto.setBackground(bg)
+        if bold:
+            f = proto.font()
+            f.setBold(True)
+            proto.setFont(f)
+        _protos[key] = proto
+    it = proto.clone()
+    it.setText('' if text is None else str(text))
     if data is not None:
         it.setData(ID_ROLE, data)
     return it
@@ -175,6 +258,8 @@ def money_cell(v, kind=None, blank_zero=True, **kw):
     color = INCOME_COLOR if kind == 'in' else EXPENSE_COLOR if kind == 'out' else None
     if v is not None and v < 0 and kind is None:
         color = EXPENSE_COLOR
+    if v == 0 and not blank_zero:
+        color = ZERO_COLOR
     return cell('' if v is None else fmt_money(v, blank_zero), RIGHT, color=kw.pop('color', color), **kw)
 
 

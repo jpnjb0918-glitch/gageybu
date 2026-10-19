@@ -90,7 +90,9 @@ class Chart(QWidget):
             return
         legend_w = min(240, max(130, W // 5))
         box = (80, 40, W - legend_w - 10, H - 40)          # 왼, 위, 오른, 아래
-        cols = {name: QColor(PALETTE[i % len(PALETTE)]) for i, name in enumerate(self.series)}
+        dark = bool((TH.sns_colors() or {}).get('dark'))       # 어두운 테마: 검은 바탕에서 보이게 조금 밝게 (안드로이드판과 같음)
+        cols = {name: QColor(TH.mix(PALETTE[i % len(PALETTE)], '#FFFFFF', 0.3) if dark else PALETTE[i % len(PALETTE)])
+                for i, name in enumerate(self.series)}
         if self.kind in ('pie', 'donut'):
             legend = self._pie(p, tn, box, cols)
         elif self.kind == 'hbar':
@@ -319,8 +321,9 @@ class GraphPage(QWidget):
         self.group.currentIndexChanged.connect(self._group_changed)
         self.monthly.toggled.connect(lambda *_: self.draw())
         lay = QVBoxLayout(self)
-        lay.addWidget(h('연도', self.year, '  대분류', self.group, '  소분류', self.cat, '  ', self.monthly, self.month,
-                        '  종류', self.kind, 'stretch', button('이미지로 저장', self.save_png)))
+        # 고르는 칸을 두 줄로: 넓은 SNS 테마 글꼴·여백에서도 [이미지로 저장] 이 화면 밖으로 밀리지 않게
+        lay.addWidget(h('연도', self.year, '  대분류', self.group, '  소분류', self.cat, 'stretch'))
+        lay.addWidget(h(self.monthly, self.month, '  종류', self.kind, 'stretch', button('이미지로 저장', self.save_png)))
         lay.addWidget(self.chart, 1)
 
     def refresh(self):

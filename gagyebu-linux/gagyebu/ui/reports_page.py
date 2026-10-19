@@ -1,6 +1,8 @@
 """결산 보고서: 월결산·년결산·월별 일일결산·사용자정의 결산·년예산."""
 import datetime as dt
 
+from PyQt6.QtCore import QEvent
+from PyQt6.QtGui import QPen
 from PyQt6.QtWidgets import (QDialog, QHeaderView, QInputDialog, QLabel, QSpinBox, QTabWidget, QVBoxLayout,
                              QWidget)
 
@@ -8,23 +10,76 @@ from .. import db
 from ..services import ledger as L
 from ..services import reports as RP
 from ..util import fmt_money, parse_money
-from .widgets import (CENTER, FOOTER_BG, SUBTOTAL_BG, DateEdit, MonthNav, button, cell, error, export_csv, fill,
-                      h, make_table, money_cell, print_table)
+from .widgets import (CENTER, FOOTER_BG, GROUP_BG, SEP_COLOR, SUBTOTAL_BG, CellDelegate, DateEdit, MonthNav, button,
+                      cell, error, export_csv, fill, h, make_table, money_cell, print_table, set_tone)
+
+
+class ReportDelegate(CellDelegate):
+    """결산 보고서 칸: 대분류가 끝나는 줄(소계) 아래와 합계 묶음 위에 굵은 선 — 대분류끼리 한눈에 나뉘게"""
+    def __init__(self, table):
+        super().__init__(table)
+        self.table, self.below, self.above = table, set(), set()
+
+    def paint(self, p, opt, idx):
+        super().paint(p, opt, idx)
+        last = idx.row() + max(1, self.table.rowSpan(idx.row(), idx.column())) - 1
+        top, bottom = idx.row() in self.above, last in self.below
+        if not (top or bottom):
+            return
+        p.save()
+        p.setPen(QPen(SEP_COLOR, 2))
+        r = opt.rect
+        if bottom:
+            p.drawLine(r.left(), r.bottom(), r.right() + 1, r.bottom())
+        if top:
+            p.drawLine(r.left(), r.top() + 1, r.right() + 1, r.top() + 1)
+        p.restore()
 
 
 class ReportView(QWidget):
-    """Report → 표. on_cell(row, col_index) 콜백으로 상세보기/예산입력."""
+    """Report → 표. on_cell(row, col_index) 콜백으로 상세보기/예산입력.
+    금액 칸은 남는 폭을 나눠 가져 표가 화면 폭을 다 채움 (좁으면 가로 스크롤). 0 은 흐리게."""
     def __init__(self, on_cell=None):
         super().__init__()
         self.report, self.on_cell = None, on_cell
         self.table = make_table(['대분류', '소분류'])
+        self.delegate = ReportDelegate(self.table)
+        self.table.setItemDelegate(self.delegate)
         self.table.cellDoubleClicked.connect(self._dbl)
+        self.table.viewport().installEventFilter(self)
         self.note = QLabel()
-        self.note.setStyleSheet('color:#777')
+        set_tone(self.note, 'note')
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.table, 1)
         lay.addWidget(self.note)
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Resize:
+            self._fit()
+        return False
+
+    def _fit(self):
+        """칸 폭 = 내용에 맞춘 폭, 남는 폭은 금액 칸들에 고르게 (표가 왼쪽에만 몰려 오른쪽이 비지 않게)"""
+        t = self.table
+        n = t.columnCount()
+        if n < 3:
+            return
+        hh = t.horizontalHeader()
+        nat = [max(t.sizeHintForColumn(c), hh.sectionSizeHint(c)) for c in range(n)]
+        room = t.viewport().width() - nat[0] - nat[1]          # 금액 칸들이 쓸 수 있는 폭
+        amt = sorted(nat[2:])
+        if room > sum(amt):
+            # 좁은 칸부터 넓혀 금액 칸 폭을 되도록 같게 (물 채우기): level 보다 좁은 칸은 level 로, 넓은 칸은 그대로
+            rest, m = room, len(amt)
+            while m > 1 and rest // m < amt[m - 1]:      # 가장 넓은 칸이 level 보다 넓으면 그 칸은 빼고 다시
+                rest -= amt[m - 1]
+                m -= 1
+            level = rest // m
+            nat[2:] = [max(wd, level) for wd in nat[2:]]
+            nat[-1] += room - sum(nat[2:])                          # 나머지 몇 px 는 마지막 칸에
+        for c, wd in enumerate(nat):
+            hh.resizeSection(c, wd)
 
     def show_report(self, rep):
         self.report = rep
@@ -32,14 +87,19 @@ class ReportView(QWidget):
         t.clearSpans()
         t.setColumnCount(2 + len(rep.columns))
         t.setHorizontalHeaderLabels(['대분류', '소분류'] + rep.columns)
+        t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         rows = []
         for r in rep.rows:
             bg = SUBTOTAL_BG if r.kind == 'subtotal' else FOOTER_BG if r.kind == 'footer' else None
             bold = r.kind != 'cat'
-            rows.append([cell(r.group if r.kind != 'footer' else r.label, CENTER, bg=bg, bold=r.kind == 'footer'),
+            rows.append([cell(r.group if r.kind != 'footer' else r.label, CENTER, bg=bg if r.kind == 'footer' else GROUP_BG,
+                              bold=True),
                          cell(r.label if r.kind != 'footer' else '', bg=bg, bold=bold)] +
                         [money_cell(v, blank_zero=False, bg=bg, bold=bold) for v in r.values])
         fill(t, rows)
+        kinds = [r.kind for r in rep.rows]
+        self.delegate.below = {i for i, k in enumerate(kinds) if k == 'subtotal'}
+        self.delegate.above = {i for i, k in enumerate(kinds) if k == 'footer' and (i == 0 or kinds[i - 1] != 'footer')}
         start = 0
         while start < len(rep.rows):                     # 대분류 칸 합치기
             r = rep.rows[start]
@@ -54,9 +114,7 @@ class ReportView(QWidget):
             if end > start:
                 t.setSpan(start, 0, end - start + 1, 1)
             start = end + 1
-        hh = t.horizontalHeader()
-        for c in range(2, t.columnCount()):
-            hh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
+        self._fit()
         self.note.setText(rep.note + ('   · 금액 칸을 두 번 누르면 상세 내역/예산 입력' if self.on_cell else ''))
 
     def _dbl(self, row, col):

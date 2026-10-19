@@ -72,10 +72,6 @@ def _build(con, lid, columns_data, ncols, extra_codes=()):
     return rows
 
 
-def _codes_in(con, lid):
-    return [r[0] for r in con.execute('SELECT DISTINCT code FROM entry WHERE ledger_id=?', (lid,))]
-
-
 def monthly(con, lid, y, m, settle_day=1):
     py, pm = add_months(y, m, -1)
     ny, nm = add_months(y, m, 1)

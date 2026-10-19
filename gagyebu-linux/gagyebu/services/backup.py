@@ -153,9 +153,6 @@ def write_csv(path, header, rows):
         w.writerows(rows)
 
 
-CSV_HEADER = ['날짜', '품목', '수입', '지출', '계정코드', '계정과목', '메모']
-
-
 def read_entries_csv(path, valid_codes):
     """원본 '엑셀데이타 불러오기' 대체: 날짜, 품목, 수입, 지출, 계정코드[, 계정과목, 메모] 순서의 CSV.
     반환: (정상 행 목록, 오류 목록[(행번호, 내용)])"""

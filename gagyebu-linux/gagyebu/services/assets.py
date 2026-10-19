@@ -11,7 +11,6 @@ INSURANCE_STATUS = ['정상', '실효']
 INSURANCE_CLASS = ['저축성', '보장성']
 INSURANCE_TYPES = ['암보험', '질병보험', '재해보험', '상해보험', '기타보험']
 INSURANCE_PAY = ['월납', '3월납', '6월납', '연납', '일시납']
-BILL_MONTHS = {-2: '전전월', -1: '전월', 0: '당월'}
 
 # 종류별 화면 항목: (키, 이름, 형식). 형식: text/money/date/int/choice:<목록>/memo/password
 FIELDS = {

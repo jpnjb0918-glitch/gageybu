@@ -34,7 +34,7 @@ Pages.calendar = (() => {
         const cls = [other ? 'other' : '', i === 0 ? 'sun' : '', i === 6 ? 'sat' : '', hol ? 'hol' : '', d === today ? 'today' : '', d === s.sel ? 'sel' : ''].join(' ');
         const sm = sums[d];
         html += `<td class="${cls}" data-d="${d}"><span class="dn">${Number(d.slice(8))}</span>${showLu ? `<span class="lu">${lu.m}.${lu.d}</span>` : ''}
-          ${an.slice(0, 1).map(a => `<div class="an">${U.esc(a[0])}</div>`).join('')}
+          ${an.slice(0, 1).map(a => `<div class="an${a[1] ? ' h' : ''}">${U.esc(a[0])}</div>`).join('')}
           ${(sch[d] || []).slice(0, 2).map(x => `<div class="sc" style="${x.bg ? `background:${U.esc(x.bg)}` : ''}">${U.esc(x.text)}</div>`).join('')}
           ${sm && sm.i ? `<div class="mi">+${short(sm.i)}</div>` : ''}${sm && sm.e ? `<div class="mo">-${short(sm.e)}</div>` : ''}</td>`;
       });

@@ -49,7 +49,6 @@ const U = (() => {
   const ord = s => { const [y, m, d] = parts(s); return Date.UTC(y, m - 1, d) / 86400000; };
   const fromOrd = n => { const t = new Date(n * 86400000); return iso(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate()); };
   const addDays = (s, n) => fromOrd(ord(s) + n);
-  const diffDays = (a, b) => ord(a) - ord(b);
   const weekday = s => (new Date(ord(s) * 86400000).getUTCDay() + 6) % 7;   // 0=월
   const monthEnd = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
   function addMonths(y, m, n) { const k = y * 12 + (m - 1) + n; return [Math.floor(k / 12), ((k % 12) + 12) % 12 + 1]; }
@@ -72,6 +71,6 @@ const U = (() => {
   const sum = arr => arr.reduce((a, b) => a + (b || 0), 0);
 
   return { INCOME_GROUP, CODE_CHARS, MONEY_LIMIT, WEEKDAYS, WEATHER, isIncomeCode, fmtMoney, parseMoney,
-    pad, iso, parts, isValidIso, today, ord, fromOrd, addDays, diffDays, weekday, monthEnd, addMonths, clampDay,
+    pad, iso, parts, isValidIso, today, ord, fromOrd, addDays, weekday, monthEnd, addMonths, clampDay,
     settlePeriod, ym, monthLabel, dateLabel, shortDate, esc, sum };
 })();

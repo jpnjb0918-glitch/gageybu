@@ -202,6 +202,7 @@ class CalendarPage(QWidget):
         scheds = C.schedules(self.con, start, end)
         today = dt.date.today()
         tn = T.tone()
+        dark = bool((T.sns_colors() or {}).get('dark'))
         for c, key in ((0, 'sun'), (6, 'sat')):
             self.grid.horizontalHeaderItem(c).setForeground(QColor(tn[key]))
         for w, week in enumerate(weeks):
@@ -216,7 +217,10 @@ class CalendarPage(QWidget):
                     parts.append(f'<span style="color:{tn["sun"] if holi else tn["ann"]};font-size:9pt">{html.escape(title)}</span>')
                 for s in scheds.get(d.isoformat(), []):
                     fg = s['fg'] or ('#333' if s['bg'] else tn['text2'])     # 배경색을 고른 일정은 진한 글자
-                    style = f"font-size:9pt;color:{fg};" + (f"background:{s['bg']};" if s['bg'] else '')
+                    bg = s['bg']
+                    if bg and dark:          # 어두운 테마: 밝은 일정 바탕을 어둡게, 글자는 그 색 그대로 (화면에서 튀지 않게)
+                        fg, bg = s['fg'] or T.mix(bg, '#FFFFFF', 0.25), T.mix('#000000', bg, 0.3)
+                    style = f"font-size:9pt;color:{fg};" + (f"background:{bg};" if bg else '')
                     txt = html.escape(s['text'].splitlines()[0][:24] if s['text'] else '')
                     parts.append(f'<span style="{style}">· {txt}</span>')
                 lab = QLabel('<br>'.join(parts))

@@ -168,10 +168,20 @@ class LedgerDelegate(QStyledItemDelegate):
         base = QFont(self.table.font())
         return base, _font(base, bold=True), _font(base, 0.88)
 
+    def _metrics(self):
+        """줄 높이 계산에 쓰는 글꼴·글자 높이 — 글꼴이 같으면 다시 만들지 않음 (1만 줄이면 줄마다 만들던 것이 0.4초)"""
+        key = self.table.font().key()
+        m = getattr(self, '_mcache', None)
+        if m is None or m[0] != key:
+            base, fb, fs = self._fonts()
+            m = (key, base, QFontMetrics(base), QFontMetrics(base).height(), QFontMetrics(fb).height(),
+                 QFontMetrics(fs).height(), QFontMetrics(_font(base, 1.12, True)).height())
+            self._mcache = m
+        return m[1:]
+
     # ── 높이 ──
     def row_height(self, row):
-        base, fb, fs = self._fonts()
-        lh, lhb, lhs = QFontMetrics(base).height(), QFontMetrics(fb).height(), QFontMetrics(fs).height()
+        base, fmb, lh, lhb, lhs, lhm = self._metrics()
         if self.feed:
             h = lh + 10                                   # 내역 글 한 줄
             if self.first_of_day(row):
@@ -181,8 +191,8 @@ class LedgerDelegate(QStyledItemDelegate):
             return h
         x, w = self._col(QRectF(0, 0, self.table.viewport().width(), 10))
         memo = self._text(row, C_MEMO)
-        lines = len(_wrap(QFontMetrics(base), memo, w - 82, 3)) if memo else 0
-        h = 12 + lhb + 2 + lines * (lh + 1) + QFontMetrics(_font(base, 1.12, True)).height() + 4 + 32 + 6
+        lines = len(_wrap(fmb, memo, w - 82, 3)) if memo else 0
+        h = 12 + lhb + 2 + lines * (lh + 1) + lhm + 4 + 32 + 6
         return h + (self.HEAD if self.first_of_day(row) else 0)
 
     def sizeHint(self, option, index):
@@ -360,11 +370,16 @@ class LedgerDelegate(QStyledItemDelegate):
         p.setPen(QColor(fg))
         p.drawText(pill.adjusted(12, 0, -12, 0), Qt.AlignmentFlag.AlignCenter,
                    fmc.elidedText(cap, Qt.TextElideMode.ElideRight, int(pill.width() - 24)))
+        # 날짜 도장: 어떤 카드 색 위에서도 읽히게 반투명 검정 알약 안에 밝은 글자 (예전 주황 글자는 노랑·청록 카드에서 안 보였음)
         stamp = f"'{d.year % 100:02d} {d.month:02d} {d.day:02d}"
-        p.setPen(QColor(0, 0, 0, 120))
-        p.drawText(QRectF(r.right() - 121, r.top() + 10, 110, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, stamp)
-        p.setPen(QColor('#FFB347'))
-        p.drawText(QRectF(r.right() - 122, r.top() + 9, 110, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, stamp)
+        fms = p.fontMetrics()
+        sw = fms.horizontalAdvance(stamp) + 16
+        sr = QRectF(r.right() - sw - 10, r.top() + 9, sw, fms.height() + 6)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 105))
+        p.drawRoundedRect(sr, sr.height() / 2, sr.height() / 2)
+        p.setPen(QColor('#FFE7B0'))
+        p.drawText(sr, Qt.AlignmentFlag.AlignCenter, stamp)
         pm = T.sticker_pixmap(TILE_STK[_hash(date) % len(TILE_STK)], 84)
         if not pm.isNull():
             dpr = pm.devicePixelRatio() or 1.0
@@ -744,8 +759,8 @@ class Trends(_Painted):
             p.setFont(fb)
             p.setPen(QColor(c['ink']))
             _elide(p, QRectF(16, y + 4 + fm.height(), r.width() - 32, fm.height()), '#' + label.replace(' ', ''))
-            p.setFont(fs)
-            p.setPen(QColor(c['muted']))
+            p.setFont(base)                     # 금액은 보통 크기·진한 글자 (작은 회색이라 잘 안 보였음)
+            p.setPen(QColor(c['ink']))
             p.drawText(QRectF(16, y + 4 + fm.height() * 2, r.width() - 32, fm.height()), Qt.AlignmentFlag.AlignVCenter,
                        f'{fmt_money(v)}원 · {cnt}건')
             y += h

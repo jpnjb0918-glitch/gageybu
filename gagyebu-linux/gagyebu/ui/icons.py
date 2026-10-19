@@ -7,7 +7,7 @@ import math
 import re
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 
 ICONS = {
     'home': '<path class="f" d="M3.5 10.2 12 3.3l8.5 6.9V19.6a1.4 1.4 0 0 1-1.4 1.4H15v-6.2H9V21H4.9a1.4 1.4 0 0 1-1.4-1.4z"/>',
@@ -238,12 +238,3 @@ def pixmap(name, size, color, on=False, width=None, dpr=None):
         pm.setDevicePixelRatio(dpr)
         _pm_cache[key] = pm
     return _pm_cache[key]
-
-
-def icon(name, size, color, on_color=None):
-    """메뉴용 QIcon: 보통은 선, 고르면 채운 모양"""
-    ic = QIcon()
-    ic.addPixmap(pixmap(name, size, color), QIcon.Mode.Normal, QIcon.State.Off)
-    ic.addPixmap(pixmap(name, size, on_color or color, on=True), QIcon.Mode.Selected, QIcon.State.Off)
-    ic.addPixmap(pixmap(name, size, on_color or color, on=True), QIcon.Mode.Active, QIcon.State.On)
-    return ic

@@ -194,8 +194,7 @@ CREATE TABLE IF NOT EXISTS legacy_raw(id INTEGER PRIMARY KEY, source TEXT, tbl T
     try { return v ? JSON.parse(v) : dflt; } catch (_) { return dflt; }
   }
   const setJson = (key, value) => setMeta(key, JSON.stringify(value));
-  const inTx = () => depth > 0;
 
-  return { SCHEMA, open, q, one, val, run, tx, inTx, getMeta, setMeta, getJson, setJson, seedDefaults,
+  return { SCHEMA, open, q, one, val, run, tx, getMeta, setMeta, getJson, setJson, seedDefaults,
     DEFAULT_ANNIVERSARIES };
 })();

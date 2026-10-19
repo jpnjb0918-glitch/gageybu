@@ -28,7 +28,8 @@ Pages.report = (() => {
       rep = Rep.custom(lid, s.start, s.end);
     }
     c.appendChild(UI.el(`<div class="section-t">${U.esc(rep.title)}</div>`));
-    if (rep.note) c.appendChild(UI.el(`<div class="small muted" style="margin:-4px 0 6px">${U.esc(rep.note)}</div>`));
+    const note = [rep.note, '금액을 누르면 ' + (s.kind === 'budget' ? '예산 입력' : '그 내역')].filter(Boolean).join(' · ');
+    c.appendChild(UI.el(`<div class="small muted" style="margin:-4px 0 6px">${U.esc(note)}</div>`));
     c.appendChild(table(rep));
     UI.on(c, 'td.tap', 'click', (e, td) => cellTap(rep, Number(td.dataset.r), Number(td.dataset.c)));
   }
@@ -39,22 +40,26 @@ Pages.report = (() => {
     if (s.kind === 'monthly' && col === 4) { const [y, m] = U.addMonths(s.y, s.m, 1); return U.ym(y, m); }
     return null;
   }
+  /** 결산 표: 대분류 이름 줄 → 계정 줄(줄무늬) → 소계 줄(굵은 선으로 끝) … → 합계 줄들. 계정 줄의 0 은 비우고, 소계·합계의 0 은 흐리게 */
   function table(rep) {
-    let html = `<div class="tablewrap"><table class="rep"><tr><th>계정과목</th>${rep.columns.map(cn => `<th>${U.esc(cn)}</th>`).join('')}</tr>`;
-    let lastGroup = null;
+    let html = `<table class="rep"><tr><th>계정과목</th>${rep.columns.map(cn => `<th>${U.esc(cn)}</th>`).join('')}</tr>`;
+    let lastGroup = null, n = 0, prev = null;
     rep.rows.forEach((r, ri) => {
       if (r.kind === 'cat' && r.group !== lastGroup) {
         lastGroup = r.group;
-        html += `<tr class="grp"><td colspan="${rep.columns.length + 1}">${U.esc(r.group)}</td></tr>`;
+        n = 0;
+        html += `<tr class="grp"><td colspan="${rep.columns.length + 1}"><span class="gname">${U.esc(r.group)}</span></td></tr>`;
       }
-      const cls = r.kind === 'subtotal' ? 'sub' : r.kind === 'footer' ? 'foot' : '';
+      const cls = r.kind === 'subtotal' ? 'sub' : r.kind === 'footer' ? (prev === 'footer' ? 'foot' : 'foot f1') : (n++ % 2 ? 'z' : '');
+      prev = r.kind;
       const label = r.kind === 'cat' ? `${U.esc(r.code)} ${U.esc(r.label)}` : U.esc(r.kind === 'subtotal' ? `${r.group} 소계` : r.label);
       html += `<tr class="${cls}"><td>${label}</td>${r.values.map((v, ci) => {
         const tap = r.kind === 'cat' && (budgetYm(rep, ci) || rep.periods[ci]);
-        return `<td class="${v < 0 ? 'neg' : ''}${tap ? ' tap' : ''}" data-r="${ri}" data-c="${ci}">${v === null || v === undefined ? '' : UI.money(v, r.kind === 'cat')}</td>`;
+        const k = [v < 0 ? 'neg' : '', v === 0 && r.kind !== 'cat' ? 'z0' : '', tap ? 'tap' : ''].filter(Boolean).join(' ');
+        return `<td class="${k}" data-r="${ri}" data-c="${ci}">${v === null || v === undefined ? '' : UI.money(v, r.kind === 'cat')}</td>`;
       }).join('')}</tr>`;
     });
-    return UI.el(html + '</table></div>');
+    return UI.tableBox(html + '</table>');
   }
   function cellTap(rep, ri, ci) {
     const r = rep.rows[ri];
@@ -80,7 +85,9 @@ Pages.report = (() => {
 // ════════ 그래프 ════════
 Pages.graph = (() => {
   const s = { y: Number(U.today().slice(0, 4)), month: 0, sel: '' };
-  const PALETTE = ['#E0507A', '#2BB5B5', '#1F6FB2', '#F0A020', '#7A5CC6', '#3A9A3A', '#C0392B', '#24595A', '#D4A017', '#8E44AD', '#16A085', '#7F8C8D'];
+  // PC판 graph_page.PALETTE 와 같은 색 (첫 줄 = 수입은 파랑, 다음 지출 계정들은 색상이 겹치지 않게). 어두운 테마는 조금 밝게
+  const PALETTE = ['#2F6FBE', '#D9534F', '#3A9A5B', '#E0912F', '#8A5CC2', '#1AA3A3', '#C2577F', '#7A7A2A', '#5B6B7A', '#B5651D', '#4A8F2A', '#A33A3A'];
+  const lighten = h => '#' + [1, 3, 5].map(i => Math.round(parseInt(h.slice(i, i + 2), 16) + (255 - parseInt(h.slice(i, i + 2), 16)) * 0.3).toString(16).padStart(2, '0')).join('');
   /** 그래프 종류 — 열쇠는 PC판 graph_page.KINDS 와 같음. 고른 것은 이 휴대폰에 기억 (graph_kind) */
   const KINDS = [
     ['line', '꺾은선', '기간별 금액을 선으로 이어요'],
@@ -93,7 +100,7 @@ Pages.graph = (() => {
     ['donut', '도넛', '항목별 합계의 비율, 가운데에 합계 (0보다 큰 항목만)'],
   ];
   const kind = () => { const k = App.pref('graph_kind'); return KINDS.some(([x]) => x === k) ? k : 'line'; };
-  const col = i => PALETTE[i % PALETTE.length];
+  const col = i => (document.body.classList.contains('dark') ? lighten : (h => h))(PALETTE[i % PALETTE.length]);
   const cut = (t, n) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
   const f1 = v => v.toFixed(1);
   const W = 360;
@@ -127,9 +134,9 @@ Pages.graph = (() => {
     };
     UI.on(kc, 'button', 'click', (e, b) => { App.setPref('graph_kind', b.dataset.g === 'line' ? null : b.dataset.g); show(); });
     show();
-    let html = `<div class="tablewrap"><table class="rep"><tr><th>항목</th>${labels.map(l => `<th>${U.esc(l)}</th>`).join('')}<th>합계</th></tr>`;
-    html += shown.map(([n, v]) => `<tr><td>${U.esc(n)}</td>${v.map(x => `<td class="${x < 0 ? 'neg' : ''}">${UI.money(x, true)}</td>`).join('')}<td class="bold">${UI.money(U.sum(v))}</td></tr>`).join('');
-    c.appendChild(UI.el(html + '</table></div>'));
+    let html = `<table class="rep"><tr><th>항목</th>${labels.map(l => `<th>${U.esc(l)}</th>`).join('')}<th>합계</th></tr>`;
+    html += shown.map(([n, v], i) => `<tr class="${i % 2 ? 'z' : ''}"><td>${U.esc(n)}</td>${v.map(x => `<td class="${x < 0 ? 'neg' : ''}">${UI.money(x, true)}</td>`).join('')}<td class="bold">${UI.money(U.sum(v))}</td></tr>`).join('');
+    c.appendChild(UI.tableBox(html + '</table>'));
   }
 
   /** 그래프 + 범례 HTML */
@@ -161,7 +168,7 @@ Pages.graph = (() => {
 
   /** 꺾은선·누계·영역·막대·누적 막대 (가로축 = 달 또는 날) */
   function xy(labels, series, k) {
-    const H = 220, pl = 46, pr = 8, pt = 10, pb = 24;
+    const H = 220, pl = 46, pr = 16, pt = 10, pb = 24;      // 오른쪽 여백: 마지막 달 이름(12월)이 잘리지 않게
     const n = labels.length;
     const data = k === 'cum' ? series.map(([nm, v]) => { let a = 0; return [nm, v.map(x => (a += x))]; }) : series;
     const pos = labels.map((_, i) => U.sum(data.map(([, v]) => Math.max(0, v[i]))));

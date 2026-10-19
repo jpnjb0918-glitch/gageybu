@@ -54,8 +54,13 @@ cat > "$STAGE/usr/share/doc/$PKG/copyright" <<EOF
   gagyebu/vendor/korean_lunar_calendar.py — MIT License
 $(sed 's/^/    /' "$HERE/gagyebu/vendor/LICENSE.korean_lunar_calendar")
 
-  gagyebu/assets/fonts/Galmuri11*.ttf — 갈무리(Galmuri) 도트 글꼴, SIL Open Font License 1.1
-    전문: /usr/share/gagyebu-linux/gagyebu/assets/fonts/OFL-Galmuri.txt
+  gagyebu/assets/fonts/ — 글꼴 (모두 SIL Open Font License 1.1, *.ttf.xz 는 xz 로 줄인 TTF 원본 그대로)
+    Galmuri11*.ttf.xz        갈무리(Galmuri) 도트 글꼴     전문: /usr/share/gagyebu-linux/gagyebu/assets/fonts/OFL-Galmuri.txt
+    GowunDodum-Regular.ttf.xz 고운돋움                    전문: .../fonts/OFL-GowunDodum.txt
+    Jua-Regular.ttf.xz        주아                        전문: .../fonts/OFL-Jua.txt
+    Gaegu-Regular.ttf.xz      개구                        전문: .../fonts/OFL-Gaegu.txt
+    PoorStory-Regular.ttf.xz  서툰이야기                  전문: .../fonts/OFL-PoorStory.txt
+    NanumPenScript-logo.ttf   나눔손글씨 펜 (로고 글자만)  전문: .../fonts/OFL-NanumPenScript.txt
 
   gagyebu/assets/stickers/*.png, gagyebu/assets/icon.png — 아늑단 이미지 (사용자가 제공한 스티커 시트에서 오려 낸 그림).
     개인 사용 목적으로 넣은 것이며, 다른 사람에게 배포할 때의 이용 허락은 그림을 그린 분들께 확인 필요.

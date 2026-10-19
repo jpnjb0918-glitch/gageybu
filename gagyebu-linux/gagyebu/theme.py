@@ -5,9 +5,10 @@
 - 설정 값은 데이터 파일이 아니라 사용자 설정(~/.config/gagyebu-linux/)에 저장 → 자료를 가져오거나 복원해도 꾸미기는 유지
 """
 import json
+import lzma
 import os
 
-from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtCore import QByteArray, QSettings, Qt
 from PyQt6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QPalette, QPixmap
 from PyQt6.QtWidgets import QApplication, QStyleFactory
 
@@ -20,9 +21,9 @@ PIXEL_FAMILY = 'Galmuri11'
 C = {
     'teal': '#347C7C', 'teal_dark': '#24595A', 'cyan': '#4BD5D5', 'cyan_dark': '#2BB5B5',
     'mint': '#B8EBE4', 'mint_pale': '#EAF9F7', 'mint_row': '#F0FBFA',
-    'pink': '#FF8FB1', 'pink_dark': '#E0507A', 'pink_pale': '#FFE3EC',
+    'pink': '#FF8FB1', 'pink_dark': '#E0507A', 'pink_pale': '#FFE3EC', 'pink_text': '#C93F68',
     'yellow': '#FFE066', 'ink': '#1A1A1A', 'white': '#FFFFFF', 'dash': '#5CC6C6', 'grey': '#8A9A9A',
-    'card': '#FFFFFF', 'on_bg': '#FFFFFF', 'caption': '#B8EBE4', 'dot': '#3F8D8D',
+    'card': '#FFFFFF', 'on_bg': '#FFFFFF', 'caption': '#E3F6F3', 'dot': '#3F8D8D',
 }
 C_DEFAULT = dict(C)          # 색 바꾸기를 되돌릴 때 쓰는 원래 색 (C 는 그 자리에서 바뀜)
 
@@ -111,13 +112,49 @@ def sticker_pixmap(sid, size, dpr=None):
 _font_family = None
 
 
+def _font_cache_dir():
+    from PyQt6.QtCore import QStandardPaths
+    base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.GenericCacheLocation) or \
+        os.path.join(os.path.expanduser('~'), '.cache')
+    return os.path.join(base, 'gagyebu-linux', 'fonts')
+
+
+def _add_font(name):
+    """assets/fonts 의 글꼴 등록. 'name.xz'(xz 로 줄인 파일)만 있으면 처음 한 번 풀어 사용자 캐시 폴더에 두고 그 파일로 등록
+    (글꼴 7개 23.7MB → 설치 2.6MB, 다음부터는 원래처럼 바로 읽힘). 캐시에 못 쓰면 메모리에서 바로 등록.
+    성공하면 글꼴 번호, 실패하면 -1"""
+    path = os.path.join(ASSETS, 'fonts', name)
+    if not os.path.exists(path + '.xz'):
+        return QFontDatabase.addApplicationFont(path)
+    try:
+        st = os.stat(path + '.xz')
+        cached = os.path.join(_font_cache_dir(), f'{st.st_size}-{name}')       # 글꼴 파일이 바뀌면 크기로 구분
+        if os.path.exists(cached):
+            i = QFontDatabase.addApplicationFont(cached)
+            if i >= 0:
+                return i
+        with open(path + '.xz', 'rb') as f:
+            data = lzma.decompress(f.read())
+    except (OSError, lzma.LZMAError):
+        return -1
+    try:
+        os.makedirs(os.path.dirname(cached), exist_ok=True)
+        tmp = cached + '.part'
+        with open(tmp, 'wb') as f:
+            f.write(data)
+        os.replace(tmp, cached)
+    except OSError:
+        pass
+    return QFontDatabase.addApplicationFontFromData(QByteArray(data))
+
+
 def load_fonts():
     """갈무리11 등록. 성공하면 글꼴 이름, 실패하면 None (그때는 시스템 글꼴로)."""
     global _font_family
     if _font_family is None:
         fam = ''
         for f in ('Galmuri11.ttf', 'Galmuri11-Bold.ttf'):
-            i = QFontDatabase.addApplicationFont(os.path.join(ASSETS, 'fonts', f))
+            i = _add_font(f)
             if i >= 0 and not fam:
                 fams = QFontDatabase.applicationFontFamilies(i)
                 fam = fams[0] if fams else ''
@@ -140,7 +177,7 @@ def extra_family(key):
     if key not in EXTRA_FONTS:
         return None
     if key not in _extra_family:
-        i = QFontDatabase.addApplicationFont(os.path.join(ASSETS, 'fonts', EXTRA_FONTS[key][1]))
+        i = _add_font(EXTRA_FONTS[key][1])
         fams = QFontDatabase.applicationFontFamilies(i) if i >= 0 else []
         _extra_family[key] = fams[0] if fams else ''
     return _extra_family[key] or None
@@ -164,7 +201,7 @@ def logo_family():
     """피드 테마 손글씨 로고 글꼴 (나눔손글씨 펜 — '우리집 가계부' 글자만 담은 작은 파일, SIL OFL 1.1)"""
     global _logo_family
     if _logo_family is None:
-        i = QFontDatabase.addApplicationFont(os.path.join(ASSETS, 'fonts', 'NanumPenScript-logo.ttf'))
+        i = _add_font('NanumPenScript-logo.ttf')
         fams = QFontDatabase.applicationFontFamilies(i) if i >= 0 else []
         _logo_family = fams[0] if fams else ''
     return _logo_family or None
@@ -189,14 +226,14 @@ QFrame#MainBox { background: %(card)s; border: 1px dashed %(dash)s; border-radiu
 QFrame#MainBox QScrollArea, QFrame#MainBox QStackedWidget { background: transparent; }
 QFrame#Banner { background: transparent; border: none; border-bottom: 2px dotted %(cyan)s; }
 QLabel#BannerTitle { color: %(teal_dark)s; %(title_font)s }
-QLabel#BannerSub { color: %(pink_dark)s; }
+QLabel#BannerSub { color: %(pink_text)s; }
 QLabel#BannerDeco { color: %(cyan_dark)s; }
 QLabel#HompyTitle { color: %(on_bg)s; %(title_font)s }
 QLabel#HompyCaption { color: %(caption)s; }
 QLabel#TodayLabel { background: %(card)s; border: 2px solid %(ink)s; border-radius: 10px; padding: 2px 10px; }
 QLabel#LedgerLabel { color: %(on_bg)s; font-weight: bold; }
 QWidget#Marquee { background: %(card)s; border: 2px solid %(ink)s; border-radius: 10px; }
-QLabel#Pill { background: %(pink)s; color: white; border: 2px solid %(ink)s; border-radius: 8px;
+QLabel#Pill { background: %(pink)s; color: %(ink)s; border: 2px solid %(ink)s; border-radius: 8px;
               padding: 1px 8px; font-weight: bold; }
 QLabel#Minimi { background: %(card)s; border: 2px solid %(ink)s; border-radius: 12px; }
 QLabel#ProfileInfo { color: %(ink)s; }
@@ -204,9 +241,11 @@ QLabel#ProfileFoot { color: %(grey)s; }
 QFrame#Dotted { border: none; border-top: 1px dashed %(dash)s; max-height: 1px; }
 QPushButton#Link { background: transparent; border: none; color: %(teal_dark)s; padding: 0; min-height: 0;
                    text-decoration: underline; }
-QPushButton#Link:hover { color: %(pink_dark)s; background: transparent; }
+QPushButton#Link:hover { color: %(pink_text)s; background: transparent; }
 QPushButton#Fold { padding: 0 4px; min-height: 0; border-radius: 6px; }
-QLabel#LoginHint { color: %(pink_dark)s; }
+QLabel#LoginHint { color: %(pink_text)s; }
+QLabel[tone="note"] { color: #5F7373; }
+QLabel[tone="warn"] { color: %(pink_text)s; font-weight: bold; }
 
 /* 오른쪽 탭 (미니홈피 메뉴) */
 QListWidget#TabNav { background: transparent; border: none; outline: none; }
@@ -214,7 +253,7 @@ QListWidget#TabNav::item { background: %(cyan)s; color: %(ink)s; border: 2px sol
                            border-top-right-radius: 9px; border-bottom-right-radius: 9px;
                            padding: 6px 8px; margin: 0px 0px 4px 0px; }
 QListWidget#TabNav::item:hover { background: %(pink_pale)s; }
-QListWidget#TabNav::item:selected { background: %(card)s; color: %(pink_dark)s; }
+QListWidget#TabNav::item:selected { background: %(card)s; color: %(pink_text)s; font-weight: bold; }
 
 /* ── 버튼: 2000년대 반짝이 버튼 ── */
 QPushButton {
@@ -222,7 +261,7 @@ QPushButton {
     border: 2px solid %(ink)s; border-radius: 9px; padding: 3px 10px; min-height: 18px; }
 QPushButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFFFFF, stop:0.49 #FFEEF3, stop:0.5 #FFD3E1, stop:1 #FFBCD0); }
-QPushButton:pressed { background: %(pink)s; color: white; }
+QPushButton:pressed { background: %(pink)s; color: %(ink)s; }
 QPushButton:default { border-color: %(pink_dark)s; }
 QPushButton:disabled { color: #9AA; border-color: #9AA; background: #EEF3F3; }
 QToolButton { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px; }
@@ -231,7 +270,7 @@ QToolButton:hover { background: %(pink_pale)s; border-color: %(ink)s; }
 /* ── 입력칸 ── */
 QLineEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComboBox, QTextEdit, QPlainTextEdit {
     background: %(card)s; border: 2px solid %(ink)s; border-radius: 6px; padding: 2px 4px;
-    selection-background-color: %(pink)s; selection-color: white; }
+    selection-background-color: %(pink)s; selection-color: %(ink)s; }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QComboBox:focus,
 QTextEdit:focus, QPlainTextEdit:focus { border-color: %(cyan_dark)s; background: #FFFFF4; }
 QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QSpinBox:disabled { color: #8A9A9A; background: #F2F5F5; border-color: #9AA; }
@@ -262,20 +301,20 @@ QTableView, QTableWidget, QTreeView, QTreeWidget, QListView, QListWidget {
 QHeaderView { background: transparent; }
 QHeaderView::section { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #8FE6E6, stop:1 %(cyan)s);
     border: none; border-right: 1px solid %(cyan_dark)s; border-bottom: 2px solid %(ink)s;
-    padding: 3px 5px; font-weight: bold; }
+    padding: 5px 6px; font-weight: bold; }
 QHeaderView::section:vertical { border-right: 2px solid %(ink)s; border-bottom: 1px solid %(cyan_dark)s; }
 QTableCornerButton::section { background: %(cyan)s; border: none; border-right: 2px solid %(ink)s; border-bottom: 2px solid %(ink)s; }
 
 /* ── 묶음 상자: 점선 + 분홍 이름표 ── */
 QGroupBox { background: #F8FFFE; border: 2px dashed %(dash)s; border-radius: 10px; margin-top: 16px; padding: 12px 8px 8px 8px; }
 QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 12px; top: 2px; padding: 1px 8px;
-    background: %(pink)s; color: white; border: 2px solid %(ink)s; border-radius: 7px; }
+    background: %(pink)s; color: %(ink)s; border: 2px solid %(ink)s; border-radius: 7px; font-weight: bold; }
 
 /* ── 탭 ── */
 QTabWidget::pane { background: %(card)s; border: 2px solid %(ink)s; border-radius: 8px; top: -2px; }
 QTabBar::tab { background: %(mint)s; border: 2px solid %(ink)s; border-bottom: none; border-top-left-radius: 9px;
     border-top-right-radius: 9px; padding: 4px 12px; margin-right: 3px; margin-top: 3px; }
-QTabBar::tab:selected { background: %(card)s; color: %(pink_dark)s; margin-top: 0px; padding-bottom: 6px; }
+QTabBar::tab:selected { background: %(card)s; color: %(pink_text)s; font-weight: bold; margin-top: 0px; padding-bottom: 6px; }
 QTabBar::tab:hover:!selected { background: %(pink_pale)s; }
 
 /* ── 스크롤바 ── */
@@ -294,7 +333,7 @@ QMenu::item { padding: 4px 18px; border-radius: 4px; }
 QMenu::item:selected { background: %(pink_pale)s; color: %(ink)s; }
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: %(cyan)s; }
 QCalendarWidget QToolButton { color: %(ink)s; font-weight: bold; }
-QCalendarWidget QAbstractItemView { selection-background-color: %(pink)s; selection-color: white; border: none; }
+QCalendarWidget QAbstractItemView { selection-background-color: %(pink)s; selection-color: %(ink)s; border: none; }
 
 QLabel#MonthLabel { %(month_font)s }
 QLabel#DayLabel { font-weight: bold; }
@@ -307,6 +346,8 @@ QListWidget#TabNav::item { padding: 7px 6px; }
 QLabel#MonthLabel { font-weight: bold; font-size: 12pt; }
 QLabel#DayLabel { font-weight: bold; font-size: 12pt; }
 QLabel#SumLabel { background: #eef4fb; padding: 8px; border-radius: 4px; }
+QLabel[tone="note"] { color: #5f6368; }
+QLabel[tone="warn"] { color: #b8322a; font-weight: bold; }
 """
 
 
@@ -379,7 +420,7 @@ _TEAL, _TEAL_DARK = '#347C7C', '#24595A'
 # 미니홈피 색 (기본): 청록 물방울 바탕 위 흰 화면, 분홍·하늘·노랑 포인트 (안드로이드판 app.css 와 같은 색)
 _MH = dict(bg=_TEAL, card='#FFFFFF', surface='#FFFFFF', surface2='#EAF6F5', grid='#E3F0EF', ink='#1A1A1A',
            muted='#5F7373', line='#CFE6E3', hover='#EAF9F7', scroll='#B8D8D5', dark=False, btn2='#E3F4F2',
-           on_bg='#FFFFFF', on_bg2='#B8EBE4', nav_hover='#4A8B8B', nav_sel_bg='#4A8B8B', navsel='#FFFFFF',
+           on_bg='#FFFFFF', on_bg2='#E3F6F3', nav_hover='#4A8B8B', nav_sel_bg='#4A8B8B', navsel='#FFFFFF',
            **{'in': '#1F6FB2', 'out': '#D23F6E'})
 SNS = {
     'feed': _sns_entry(**dict(_MH, sel='#FFE3EC', accent='#E0507A', accent2='#C93F68',
@@ -396,7 +437,7 @@ SNS = {
     'timeline_light': _sns_entry(bg='#FFFFFF', card='#FFFFFF', surface='#FFFFFF', surface2='#F7F9F9', grid='#EFF3F4',
                                  ink='#0F1419', muted='#536471', line='#EFF3F4', hover='#F2F4F5', sel='#E8F5FD',
                                  accent='#1D9BF0', accent2='#1A8CD8', navsel='#0F1419', scroll='#CCD6DD', btn2='#EFF3F4',
-                                 ring=None, dark=False, **{'in': '#1D9BF0', 'out': '#F4212E'}),
+                                 ring=None, dark=False, **{'in': '#1A8CD8', 'out': '#F4212E'}),
     'timeline_dark': _sns_entry(bg='#000000', card='#000000', surface='#000000', surface2='#16181C', grid='#2F3336',
                                 ink='#E7E9EA', muted='#71767B', line='#2F3336', hover='#181919', sel='#0A2A40',
                                 accent='#1D9BF0', accent2='#3AA7F0', navsel='#E7E9EA', scroll='#3A4148', btn2='#202327',
@@ -423,10 +464,12 @@ QWidget#SnsRail { background: %(rail_bg)s; %(rail_extra)s }
 QLabel#RailLogo { color: %(on_bg)s; padding: 4px 10px 10px 12px; }
 QLabel#RailName { color: %(on_bg)s; font-weight: 700; }
 QLabel#RailSub { color: %(on_bg2)s; }
+QLabel[tone="note"] { color: %(muted)s; }
+QLabel[tone="warn"] { color: %(out)s; font-weight: bold; }
 QListWidget#TabNav { background: transparent; border: none; outline: none; font-size: 12pt; }
 QListWidget#TabNav::item { padding: 9px 10px; margin: 2px 0px; border-radius: 10px; color: %(on_bg)s; }
 QListWidget#TabNav::item:hover { background: %(nav_hover)s; }
-QListWidget#TabNav::item:selected { background: transparent; color: %(on_bg)s; font-weight: 800; }
+QListWidget#TabNav::item:selected { background: %(nav_sel_bg)s; color: %(on_bg)s; font-weight: 800; }
 QPushButton#RailCompose { background: %(fab)s; color: white; border: none; border-radius: 23px; min-height: 34px;
     font-size: 12pt; font-weight: 800; }
 QPushButton#RailCompose:hover { background: %(accent2)s; }
@@ -460,11 +503,12 @@ QToolButton:hover { background: %(hover)s; }
 
 /* 입력칸 */
 QLineEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComboBox, QTextEdit, QPlainTextEdit {
-    background: %(surface)s; color: %(ink)s; border: 1px solid %(line)s; border-radius: 8px; padding: 4px 8px;
+    background: %(surface)s; color: %(ink)s; border: 1px solid %(input_line)s; border-radius: 8px; padding: 4px 8px;
     selection-background-color: %(accent)s; selection-color: white; }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QComboBox:focus,
 QTextEdit:focus, QPlainTextEdit:focus { border: 1px solid %(accent)s; }
-QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QSpinBox:disabled { color: %(muted)s; background: %(surface2)s; }
+QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QSpinBox:disabled { color: %(muted)s; background: %(surface2)s;
+    border-color: %(line)s; }
 QComboBox QAbstractItemView { background: %(surface)s; color: %(ink)s; border: 1px solid %(line)s;
     selection-background-color: %(hover)s; selection-color: %(ink)s; outline: none; }
 QComboBox QAbstractItemView::item { min-height: 28px; padding: 0 8px; }
@@ -486,10 +530,13 @@ QSpinBox::down-arrow, QDoubleSpinBox::down-arrow { image: url("%(chev_down)s"); 
 QTableView, QTableWidget, QTreeView, QTreeWidget, QListView, QListWidget {
     background: %(card)s; alternate-background-color: %(surface2)s; color: %(ink)s; border: 1px solid %(line)s;
     border-radius: 10px; gridline-color: %(grid)s; selection-background-color: %(sel)s; selection-color: %(ink)s; }
+/* 표만: 줄무늬·선택·칸 선 색 (미니홈피 색이면 미니홈피 테마 표와 같은 민트 줄무늬·분홍 선택) */
+QTableView, QTableWidget { alternate-background-color: %(tbl_alt)s; gridline-color: %(tbl_grid)s;
+    selection-background-color: %(tbl_sel)s; }
 QHeaderView { background: transparent; }
-QHeaderView::section { background: %(card)s; color: %(muted)s; border: none; border-bottom: 1px solid %(line)s;
-    padding: 5px 6px; font-weight: bold; }
-QTableCornerButton::section { background: %(card)s; border: none; }
+QHeaderView::section { background: %(hdr_bg)s; color: %(ink)s; border: none; border-bottom: %(hdr_line)s;
+    border-right: 1px solid %(hdr_sep)s; padding: 6px 8px; font-weight: bold; }
+QTableCornerButton::section { background: %(hdr_bg)s; border: none; }
 
 /* 묶음 상자 */
 QGroupBox { background: %(card)s; border: 1px solid %(line)s; border-radius: 12px; margin-top: 18px;
@@ -592,7 +639,8 @@ def base_colors(theme=None):
         return {'accent': g(QPalette.ColorRole.Highlight), 'bg': g(QPalette.ColorRole.Window), 'card': g(QPalette.ColorRole.Base),
                 'ink': g(QPalette.ColorRole.Text), 'in': '#1D5FBF', 'out': '#B8322A'}
     d = C_DEFAULT
-    return {'accent': d['pink'], 'bg': d['teal'], 'card': d['card'], 'ink': d['ink'], 'in': '#1D5FBF', 'out': '#B8322A'}
+    # 수입·지출 글자색: 미니홈피 색 SNS 테마·안드로이드판 미니홈피와 같은 파랑·분홍빨강
+    return {'accent': d['pink'], 'bg': d['teal'], 'card': d['card'], 'ink': d['ink'], 'in': '#1F6FB2', 'out': '#D23F6E'}
 
 
 def _json_pref(key, dflt):
@@ -667,7 +715,7 @@ def _sns_colors(theme):
                  'scroll': mix(card, ink, 0.25), 'dark': dark,
                  'page': card, 'btn2': mix(card, bg if sep else ink, 0.1 if sep else 0.08),
                  'fab': base.get('fab', acc) if 'accent' not in cu else acc,
-                 'on_bg': on_bg, 'on_bg2': mix(on_bg, bg, 0.3), 'nav_hover': mix(bg, on_bg, 0.12) if sep else hover,
+                 'on_bg': on_bg, 'on_bg2': mix(on_bg, bg, 0.15), 'nav_hover': mix(bg, on_bg, 0.12) if sep else hover,
                  'nav_sel_bg': mix(bg, on_bg, 0.12) if sep else hover})
     if feed and 'accent' in cu:
         base['ring'] = (mix(acc, '#FFC861', 0.55), acc, mix(acc, '#8B5CF6', 0.55))
@@ -684,10 +732,11 @@ def _apply_retro_colors():
     c = effective_colors('retro')
     bg, card, acc = c['bg'], c['card'], c['accent']
     C.update({'teal': bg, 'teal_dark': mix(bg, '#000000', 0.3), 'pink': acc, 'pink_dark': mix(acc, '#000000', 0.18),
+              'pink_text': mix(acc, '#000000', 0.3),
               'pink_pale': mix(card, acc, 0.18), 'mint_pale': mix(card, bg, 0.1), 'mint': mix(card, bg, 0.3),
               'mint_row': mix(card, bg, 0.06), 'dash': mix(card, bg, 0.6), 'ink': c['ink'], 'card': card,
               'on_bg': '#FFFFFF' if lum(bg) < 0.4 else '#1A1A1A',
-              'caption': mix(bg, '#FFFFFF', 0.7) if lum(bg) < 0.4 else mix(bg, '#000000', 0.55),
+              'caption': mix(bg, '#FFFFFF', 0.85) if lum(bg) < 0.4 else mix(bg, '#000000', 0.6),
               'dot': mix(bg, '#FFFFFF', 0.1)})
 
 
@@ -767,23 +816,51 @@ def sns_palette(c):
     return p
 
 
+# 미니홈피 표 색 — 미니홈피 테마와 미니홈피 색(피드·타임라인) 테마, 안드로이드판 main.js applyTableColors 와 같음
+MH_TABLE = dict(hdr_bg='qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #8FE6E6, stop:1 #4BD5D5)',
+                hdr_line='2px solid #2BB5B5', hdr_sep='#2BB5B5', tbl_alt='#F0FBFA', tbl_grid='#CBEDEA', tbl_sel='#FFD1DF')
+
+
+def table_colors(theme=None):
+    """SNS 테마의 표 머리줄·줄무늬·선택 색. 미니홈피 색이면 미니홈피 표와 같게, 밝게·어둡게는 그 바탕에 맞춤"""
+    theme = theme or current()[0]
+    c = sns_colors(theme)
+    if variant_of(theme) == 'mh':
+        return dict(MH_TABLE)
+    # 고른 줄: 줄무늬·소계와 헷갈리지 않게 포인트 색을 더 진하게
+    return dict(hdr_bg=c['surface2'], hdr_line=f"1px solid {mix(c['card'], c['ink'], 0.32)}", hdr_sep=c['grid'],
+                tbl_alt=c['surface2'], tbl_grid=c['grid'], tbl_sel=mix(c['card'], c['accent'], 0.35 if c['dark'] else 0.24))
+
+
 def tone(theme=None):
     """직접 그리는 화면(달력·그래프)과 표 색. 어두운 테마면 밝은 글자색."""
     theme = theme or current()[0]
     c = sns_colors(theme)
     eff = effective_colors(theme)
     if c and c['dark']:
-        return {'text': c['ink'], 'text2': '#D0D4D8', 'faint': '#5A6168', 'lunar': '#7D848B', 'ann': '#5FC28F',
+        return {'text': c['ink'], 'text2': '#D0D4D8', 'faint': '#5A6168', 'lunar': '#8F969D', 'ann': '#5FC28F',
                 'today_bg': '#3A3412', 'sel_bg': c['sel'], 'chart_bg': c['surface'], 'grid': c['grid'],
                 'axis': '#A0A6AC', 'axis2': c['muted'], 'legend': '#D0D4D8', 'title': c['ink'],
                 'sun': '#F45C84', 'sat': '#52AEF2', 'in': c['in'], 'out': c['out'],
-                'subtotal_bg': mix(c['card'], '#F2C94C', 0.12), 'footer_bg': mix(c['card'], '#9457D6', 0.12)}
-    t = {'text': '#222', 'text2': '#333', 'faint': '#aaa', 'lunar': '#999', 'ann': '#2f7d5b',
+                # 표: 소계·합계 줄은 포인트 색을 옅게(합계가 더 진하게), 대분류 칸은 회색, 0 은 흐리게
+                'subtotal_bg': mix(c['card'], c['accent'], 0.20), 'footer_bg': mix(c['card'], c['accent'], 0.34),
+                'zero': mix(c['card'], c['ink'], 0.36), 'group_bg': mix(c['card'], c['ink'], 0.10),
+                'sep': mix(c['card'], c['ink'], 0.42)}
+    t = {'text': '#222', 'text2': '#333', 'faint': '#aaa', 'lunar': '#767676', 'ann': '#2f7d5b',
          'today_bg': '#fff5d6', 'sel_bg': '#eaf2ff', 'chart_bg': '#ffffff', 'grid': '#e3e3e3',
          'axis': '#555', 'axis2': '#777', 'legend': '#333', 'title': '#222', 'sun': '#d0312d', 'sat': '#2f6fbe',
-         'in': '#1d5fbf', 'out': '#b8322a', 'subtotal_bg': '#fdf1e3', 'footer_bg': '#ece8f6'}
-    if c:
-        t.update({'in': c['in'], 'out': c['out'], 'sel_bg': c['sel']})
+         'in': '#1d5fbf', 'out': '#b8322a', 'subtotal_bg': '#fdf1e3', 'footer_bg': '#ece8f6',
+         # 0 원(흐리게)·결산 보고서 대분류 칸·대분류끼리 나누는 선
+         'zero': '#b8b8b8', 'group_bg': '#eef2f7', 'sep': '#9aa4ae'}
+    if c and variant_of(theme) == 'mh':          # 미니홈피 색: 미니홈피 테마처럼 살구색 소계·민트 대분류·청록 선
+        t.update({'in': c['in'], 'out': c['out'], 'sel_bg': c['sel'], 'group_bg': mix(c['card'], '#4BD5D5', 0.16),
+                  'sep': '#5CC6C6'})
+    elif c:
+        t.update({'in': c['in'], 'out': c['out'], 'sel_bg': c['sel'], 'subtotal_bg': mix(c['card'], c['accent'], 0.09),
+                  'footer_bg': mix(c['card'], c['accent'], 0.18), 'group_bg': mix(c['card'], c['ink'], 0.045),
+                  'sep': mix(c['card'], c['ink'], 0.32)})
+    elif theme == 'retro':
+        t.update({'in': eff['in'], 'out': eff['out'], 'group_bg': mix(eff['card'], C['cyan'], 0.16), 'sep': C['dash']})
     else:
         t.update({'in': eff['in'], 'out': eff['out']})
     return t
@@ -888,8 +965,30 @@ def current():
     return theme, pixel
 
 
+def _set_style(app, name):
+    """같은 스타일이면 다시 만들지 않음 — 스타일·팔레트·글꼴·스타일시트를 바꿀 때마다 Qt 가 모든 위젯을 다시 꾸며
+    (켤 때 같은 테마를 두 번 입히느라 1초 넘게 걸리던 것)"""
+    if getattr(app, '_gb_style', None) == name.lower():
+        return
+    st = QStyleFactory.create(name)
+    if st is not None:
+        app.setStyle(st)
+        app._gb_style = name.lower()
+
+
+def _set_look(app, pal, font, qss):
+    """색·글꼴·스타일시트 중 하나라도 바뀌었으면 셋 다 다시 입힘 (스타일시트를 다시 입혀야 바뀐 글꼴이 모든 위젯에 퍼짐),
+    하나도 안 바뀌었으면 건너뜀"""
+    if app.palette() == pal and app.font() == font and app.styleSheet() == qss:
+        return
+    app.setPalette(pal)
+    app.setFont(font)
+    app.setStyleSheet(qss)
+
+
 def apply(app=None):
-    """앱 전체에 테마 적용. 처음 부를 때 원래 스타일·팔레트·글꼴을 기억해 '기본'으로 되돌릴 수 있게 함."""
+    """앱 전체에 테마 적용. 처음 부를 때 원래 스타일·팔레트·글꼴을 기억해 '기본'으로 되돌릴 수 있게 함.
+    바뀐 것만 다시 입힘 (같은 테마를 다시 입히면 거의 0초)"""
     app = app or QApplication.instance()
     if not hasattr(app, '_gb_orig'):
         app._gb_orig = (app.style().name(), QPalette(app.palette()), QFont(app.font()))
@@ -898,40 +997,33 @@ def apply(app=None):
     _sns_cache.clear()
     _apply_retro_colors()
     if theme == 'retro':
-        fusion = QStyleFactory.create('Fusion')
-        if fusion is not None:
-            app.setStyle(fusion)
-        app.setPalette(retro_palette())
+        _set_style(app, 'Fusion')
         if pixel:
             f = QFont(PIXEL_FAMILY)
             f.setPixelSize(12)
             f.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
-            app.setFont(_with_px(f))
+            f = _with_px(f)
         else:
-            app.setFont(_with_px(_font_for(font0)))
-        app.setStyleSheet(retro_qss(pixel))
+            f = _with_px(_font_for(font0))
+        _set_look(app, retro_palette(), f, retro_qss(pixel))
     elif theme in SNS_THEMES:
         c = sns_colors(theme)
-        fusion = QStyleFactory.create('Fusion')
-        if fusion is not None:
-            app.setStyle(fusion)
-        app.setPalette(sns_palette(c))
-        app.setFont(_with_px(_font_for(font0)))
+        _set_style(app, 'Fusion')
         tag = 'light' if c['dark'] else 'grey'
         mh = variant_of(theme) == 'mh'
         extra = dict(rail_bg='transparent' if mh else c['card'],
                      rail_extra='' if mh else f"border-right: 1px solid {c['line']};",
                      mainbox_extra='border-top-left-radius: 18px; border-bottom-left-radius: 18px;' if mh else '',
                      rail_combo=c['card'] if mh else c['btn2'])     # 장부 고르기: 흰 알약 (펼친 목록 글자도 진하게)
-        app.setStyleSheet(SNS_QSS % dict(c, check=_url('check-white.png'), chev_down=_url(f'chev-down-{tag}.png'),
-                                         chev_up=_url(f'chev-up-{tag}.png'), **extra))
+        extra.update(table_colors(theme))
+        # 입력칸 테두리: 바탕과 확실히 구분되게 (미니홈피 색은 청록빛, 밝게·어둡게는 회색)
+        extra['input_line'] = mix(c['card'], c['bg'], 0.5) if mh else mix(c['card'], c['ink'], 0.38)
+        _set_look(app, sns_palette(c), _with_px(_font_for(font0)),
+                  SNS_QSS % dict(c, check=_url('check-white.png'), chev_down=_url(f'chev-down-{tag}.png'),
+                                 chev_up=_url(f'chev-up-{tag}.png'), **extra))
     else:
-        st = QStyleFactory.create(style0)
-        if st is not None:
-            app.setStyle(st)
-        app.setPalette(_basic_palette(pal0))
-        app.setFont(_with_px(_font_for(font0)))
-        app.setStyleSheet(BASIC_QSS)
+        _set_style(app, style0)
+        _set_look(app, _basic_palette(pal0), _with_px(_font_for(font0)), BASIC_QSS)
     _pix_cache.clear()
     from .ui import widgets as _w          # 표의 수입·지출 글자색, 소계 배경색
     _w.retheme(tone(theme))

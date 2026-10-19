@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt
 from ..services import assets as A
 from ..services import ledger as L
 from ..util import fmt_money
-from .widgets import (CENTER, CodeCombo, DateEdit, FormDialog, MoneyEdit, MonthNav, button, cell, confirm, error,
+from .widgets import (CENTER, INCOME_COLOR, CodeCombo, DateEdit, FormDialog, MoneyEdit, MonthNav, button, cell, confirm, error,
                       export_csv, fill, h, info, make_table, money_cell, selected_ids)
 
 COLS = {
@@ -524,5 +524,5 @@ class AssetsPage(QWidget):
         self.sum_lbl.setText(f"<b>자산 합계 {m(s['자산합계'])}</b>  (예금 {m(s['예금'])} · 증권 {m(s['증권'])} · "
                              f"부동산 {m(s['부동산'])} · 기타 {m(s['기타'])})&nbsp;&nbsp;&nbsp;&nbsp;"
                              f"<b>부채 합계 {m(s['부채합계'])}</b>  (대출 {m(s['대출'])} · 카드 {m(s['카드'])} · "
-                             f"기타부채 {m(s['기타부채'])})&nbsp;&nbsp;&nbsp;&nbsp;<b style='color:#1d5fbf'>순자산 {m(s['순자산'])}원</b>")
+                             f"기타부채 {m(s['기타부채'])})&nbsp;&nbsp;&nbsp;&nbsp;<b style='color:{INCOME_COLOR.name()}'>순자산 {m(s['순자산'])}원</b>")
         self.tabs.currentWidget().refresh()

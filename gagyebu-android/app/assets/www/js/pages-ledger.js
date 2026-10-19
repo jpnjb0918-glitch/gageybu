@@ -310,7 +310,7 @@ Pages.ledger = (() => {
             <div class="pinl">${UI.icon('pin')}고정된 글</div>
             <div class="l1"><b>${U.esc(App.ledgerName())}</b><span class="meta">@${s.m}월_요약 · ${s.y}.${s.m}</span></div>
             <div class="txt">${s.m}월 수입 <b class="in">${UI.money(inc)}원</b>, 지출 <b class="out">${UI.money(exp)}원</b>
-차액 <b class="${UI.moneyCls(inc - exp)}">${UI.money(inc - exp)}원</b> · 현재 잔액 <b class="${UI.moneyCls(bal)}">${UI.money(bal)}원</b>
+차액 <b class="${UI.moneyCls(inc - exp)}">${UI.money(inc - exp)}원</b> · 현재&nbsp;잔액&nbsp;<b class="${UI.moneyCls(bal)}">${UI.money(bal)}원</b>
 오늘의 기분: ${U.esc(App.pref('mood'))}</div>
             <div class="acts"><span class="ind" title="내역 건수">${UI.icon('comment')}${rows.length}</span><span class="ind" title="수입 건수">${UI.icon('heart')}${nIn}</span>
               <span class="ind" title="지출 건수">${UI.icon('repeat')}${nOut}</span><span class="ind" title="오늘 지출">${UI.icon('stats')}${UI.money(texp)}</span></div></div></div>`);

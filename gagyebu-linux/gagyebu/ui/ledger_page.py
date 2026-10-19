@@ -13,7 +13,7 @@ from ..services import ledger as L
 from ..util import fmt_money, month_end
 from ..services import order as O
 from .widgets import (CENTER, CodeCombo, DateEdit, MoneyEdit, MonthNav, ask_order, button, cell, confirm, error,
-                      export_csv, fill, info, make_table, money_cell, print_table, selected_ids)
+                      export_csv, fill, info, make_table, money_cell, print_table, selected_ids, set_tone)
 from . import icons as I
 from .sns import C_ITEM, C_MEMO, POST_W, Highlights, LedgerDelegate, PinnedPost, ProfileHeader, SnsTabs, Trends
 
@@ -124,7 +124,6 @@ class LedgerPage(QWidget):
         super().__init__()
         self.app, self.con = app, app.con
         self.editing = None
-        self.copy_note = ''
         self.nav = MonthNav()
         self.nav.changed.connect(lambda *_: self.refresh())
         self.all_chk = QCheckBox('전체 기간')
@@ -145,8 +144,8 @@ class LedgerPage(QWidget):
         self.save_btn.setDefault(True)
         self.new_btn = button('새로 입력', self.new)
         self.del_btn = button('삭제', self.delete)
-        self.mode_lbl = QLabel('새 내역 입력')
-        self.mode_lbl.setStyleSheet('color:#666')
+        self.mode_lbl = set_tone(QLabel('새 내역 입력'), 'note')
+        self.mode_lbl.setWordWrap(True)           # 긴 품목 이름이 입력 칸을 넓혀 화면 밖으로 밀지 않게
         box = QGroupBox('입력하기')
         self.box = box
         bl = QVBoxLayout(box)
@@ -160,7 +159,7 @@ class LedgerPage(QWidget):
         bl.addStretch(1)
         tips = QLabel('· 품목을 예전과 같게 쓰면 계정이 자동 선택됩니다\n· Enter=다음 칸, F5=저장, Delete=선택 내역 삭제\n'
                       '· 여러 줄을 골라 한꺼번에 삭제할 수 있습니다')
-        tips.setStyleSheet('color:#777')
+        set_tone(tips, 'note')
         tips.setWordWrap(True)
         bl.addWidget(tips)
 
@@ -208,7 +207,6 @@ class LedgerPage(QWidget):
         self.sns_month = QWidget()
         mr = QHBoxLayout(self.sns_month)
         mr.setContentsMargins(16, 6, 16, 6)
-        self.sns_month_lay = mr
         mr.addStretch(1)
         self.sns_month_box = QWidget()
         self.sns_month_box.setMaximumWidth(POST_W)
@@ -560,9 +558,11 @@ class LedgerPage(QWidget):
                 self.editing = e['id']
                 self.form.set_value(e)
                 self.mode_lbl.setText(f"선택한 내역 수정 중 ({e['date']} {e['item']}) — 저장하면 덮어씁니다")
-                self.mode_lbl.setStyleSheet('color:#b8322a')
-                self.save_btn.setText('수정 저장 (F5)')
-                if self._sns():                       # 가운데 칸이 통째로 스크롤되므로 고른 줄이 보이게
+                set_tone(self.mode_lbl, 'warn')
+                self.save_btn.setText('수정 (F5)')      # 글자 폭을 '저장 (F5)' 와 같게 (입력 칸이 넓어져 화면 밖으로 밀리지 않게)
+                # 가운데 칸이 통째로 스크롤되므로 고른 줄이 보이게. 화면 모양을 바꾸는 중(표를 옮기는 중)에는 건너뜀 —
+                # 표가 가운데 칸 안에 없을 때 위치를 바꿔 계산하면 Qt 가 죽음
+                if self._sns() and self.sns_inner.isAncestorOf(self.table):
                     r = self.table.currentRow()
                     if r >= 0:
                         y0 = self.table.mapTo(self.sns_inner, QPoint(0, self.table.rowViewportPosition(r))).y()
@@ -573,7 +573,7 @@ class LedgerPage(QWidget):
         self.table.clearSelection()
         self.form.clear()
         self.mode_lbl.setText('새 내역 입력')
-        self.mode_lbl.setStyleSheet('color:#666')
+        set_tone(self.mode_lbl, 'note')
         self.save_btn.setText('저장 (F5)')
         self.form.item.setFocus()
 

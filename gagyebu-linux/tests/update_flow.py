@@ -74,7 +74,6 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from gagyebu import __version__, db  # noqa: E402
 from gagyebu import theme as TH  # noqa: E402
-from gagyebu.services import ledger as L  # noqa: E402
 from gagyebu.services import update as U  # noqa: E402
 
 path = os.path.join(tmp, 'g.sqlite3')

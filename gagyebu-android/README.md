@@ -47,6 +47,9 @@ python3 graph_month.py        # 그래프 종류 8가지·연월 바로 고르�
 python3 update_flow.py        # 새 버전 알림·내려받기·설치 흐름 (가짜 릴리스 목록, shots/update/)
 python3 ledger_font.py        # 기본 장부·목록에서 새 장부·글자 크기 1px (shots/ledger/)
 python3 sns_ui.py             # 피드·타임라인 아이콘·탭·동그라미, 무료 한글 글꼴 (shots/sns/)
+python3 tables.py             # 테마별 표(결산 보고서·그래프): 머리줄·첫 칸 고정, 색·줄무늬·0 흐리게 (shots/tables/)
+python3 visibility.py         # 화면 전체 가시성: 잘림·글자 대비·입력칸 테두리·＋ 단추·달력·그래프 (shots/vis/)
+python3 perf.py [내역 수]      # 속도: 켜기·테마마다 가계부·화면 이동·검색·결산 (가짜 저장소라 DB 시간은 실제와 다름)
 python3 compat/run.py         # PC판 파이썬 코드와 계산 결과 비교 (../gagyebu-linux 필요)
 ```
 

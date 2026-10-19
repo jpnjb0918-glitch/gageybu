@@ -15,9 +15,9 @@ os.environ['XDG_CONFIG_HOME'] = os.path.join(tmp, 'config')
 os.environ['HOME'] = tmp                                   # 구글 드라이브 폴더 찾기를 시험용 집 폴더에서
 os.makedirs(os.path.join(tmp, 'Google Drive'))
 
-from PyQt6.QtCore import QEvent, QPoint, Qt  # noqa: E402
+from PyQt6.QtCore import QEvent, Qt  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QFileDialog  # noqa: E402
+from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from gagyebu import db  # noqa: E402
 from gagyebu import theme as TH  # noqa: E402

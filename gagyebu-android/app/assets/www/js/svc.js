@@ -286,12 +286,6 @@ const L = (() => {
 
   // ── 품목 자동완성 ──
   const itemWords = (lid, minCount) => DB.q('SELECT name, count FROM item_word WHERE ledger_id=? AND count>=? ORDER BY count DESC, name', [lid, minCount || 1]);
-  function setItemWord(lid, name, count, oldName) {
-    DB.tx(() => {
-      if (oldName && oldName !== name) DB.run('DELETE FROM item_word WHERE ledger_id=? AND name=?', [lid, oldName]);
-      DB.run('INSERT OR REPLACE INTO item_word VALUES(?,?,?)', [lid, name, count]);
-    });
-  }
   const deleteItemWord = (lid, name) => DB.run('DELETE FROM item_word WHERE ledger_id=? AND name=?', [lid, name]);
   function lastCodeForItem(lid, item) {
     const r = DB.one('SELECT code FROM entry WHERE ledger_id=? AND item=? ORDER BY date DESC, id DESC LIMIT 1', [lid, item]);
@@ -304,7 +298,7 @@ const L = (() => {
   return { ledgers, addLedger, ensureDefaultLedgers, DEFAULT_EXTRA_LEDGERS, renameLedger, firstLedgerId, deleteLedger, resetLedger, groups, categories,
     categoryMap, groupMap, setGroup, deleteGroup, setCategory, moveCategoryOrder, mergeCategory, categoryUsage,
     deleteCategory, addEntry, updateEntry, deleteEntries, getEntry, balanceBefore, entriesWithBalance, totals,
-    currentBalance, AMOUNT_OPS, search, itemWords, setItemWord, deleteItemWord, lastCodeForItem, codeLabel, signedAmount };
+    currentBalance, AMOUNT_OPS, search, itemWords, deleteItemWord, lastCodeForItem, codeLabel, signedAmount };
 })();
 
 // ════════════════ 예약 (services/recurring.py) ════════════════
@@ -935,7 +929,6 @@ const Cal = (() => {
     [text, parseInt(remindDays || 0, 10), bg || null, fg || null, sid]);
   const deleteSchedule = sid => DB.run('DELETE FROM schedule WHERE id=?', [sid]);
   const deleteScheduleGroup = gid => DB.run('DELETE FROM schedule WHERE group_id=?', [gid]).changes;
-  const deleteScheduleRange = (start, end) => DB.run('DELETE FROM schedule WHERE date BETWEEN ? AND ?', [start, end]).changes;
   function schedules(start, end) {
     const out = {};
     for (const r of DB.q('SELECT * FROM schedule WHERE date BETWEEN ? AND ? ORDER BY date, id', [start, end])) (out[r.date] = out[r.date] || []).push(r);
@@ -1001,7 +994,7 @@ const Cal = (() => {
   function simpleDelete(table, rid) { if (TABLES[table]) DB.run(`DELETE FROM ${table} WHERE id=?`, [rid]); }
 
   return { WEEKDAY_SETS, ORDINALS, WEEKDAY_NAMES, nthWeekday, expandRepeat, addSchedule, updateSchedule, deleteSchedule,
-    deleteScheduleGroup, deleteScheduleRange, schedules, reminders, anniversaries, saveAnniversary, deleteAnniversary,
+    deleteScheduleGroup, schedules, reminders, anniversaries, saveAnniversary, deleteAnniversary,
     anniversariesBetween, monthGrid, simpleList, simpleSave, simpleDelete };
 })();
 

@@ -85,10 +85,6 @@ def settle_period(y, m, settle_day=1):
     return start, end
 
 
-def month_label(y, m):
-    return f'{y}년 {m}월'
-
-
 def hash_password(pw, salt=None):
     salt = salt or os.urandom(16).hex()
     h = hashlib.pbkdf2_hmac('sha256', pw.encode('utf-8'), bytes.fromhex(salt), 120_000).hex()
@@ -105,5 +101,4 @@ def check_password(pw, stored):
     return hash_password(pw, salt) == stored
 
 
-WEEKDAYS = '월화수목금토일'
 WEATHER = ['맑음', '구름 조금', '흐림', '소나기', '비', '비 온 후 갬', '눈', '비 또는 눈', '천둥번개']

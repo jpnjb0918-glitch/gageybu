@@ -51,7 +51,7 @@ const App = (() => {
     feed_light: { accent: '#E5487E', bg: '#FAFAFA', card: '#FFFFFF', ink: '#1F1F1F', in: '#2F6FDB', out: '#E0336A' },
     feed_dark: { accent: '#F0568C', bg: '#000000', card: '#000000', ink: '#F2F2F2', in: '#5B9BF5', out: '#F45C84' },
     timeline: { accent: '#347C7C', bg: '#347C7C', card: '#FFFFFF', ink: '#1A1A1A', in: '#1F6FB2', out: '#D23F6E' },
-    timeline_light: { accent: '#1D8FE1', bg: '#FFFFFF', card: '#FFFFFF', ink: '#16191C', in: '#1D8FE1', out: '#E0336A' },
+    timeline_light: { accent: '#1D8FE1', bg: '#FFFFFF', card: '#FFFFFF', ink: '#16191C', in: '#1A8CD8', out: '#E0336A' },
     timeline_dark: { accent: '#2A9BEA', bg: '#000000', card: '#000000', ink: '#E6E8EA', in: '#52AEF2', out: '#F45C84' },
   };
   const baseColors = t => Object.assign({}, BASE_COLORS[t || theme()]);
@@ -107,11 +107,36 @@ const App = (() => {
       if (layoutOf(t) === 'feed') set('--ring', `linear-gradient(45deg, ${mix(c.accent, '#FFC861', 0.55)}, ${c.accent} 55%, ${mix(c.accent, '#8B5CF6', 0.55)})`);
       if (variantOf(t) === 'mh') {          // 미니홈피 색: 맨 위는 바탕색 그대로, 그 위 글자는 바탕에 맞춰
         const onTop = lum(c.bg) < 0.4 ? '#FFFFFF' : '#1A1A1A';
-        set('--on-top', onTop); set('--on-top-2', mix(onTop, c.bg, 0.3));
+        set('--on-top', onTop); set('--on-top-2', mix(onTop, c.bg, 0.15));
         set('--page', layoutOf(t) === 'feed' ? mix(c.card, c.bg, 0.1) : c.card);
       }
     }
     return c;
+  }
+  /** 표(결산 보고서) 색 — PC판 theme.tone() 의 subtotal_bg·footer_bg·group_bg·sep·zero 와 같은 규칙.
+      소계·합계 줄 배경, 대분류 줄 배경, 대분류끼리 나누는 선, 0 글자색. 고친 색(포인트·카드·글자)을 따라감 */
+  function applyTableColors(t) {
+    const c = Object.assign(baseColors(t), customColors(t));
+    const v = variantOf(t);
+    // 머리줄(hdr)·머리줄 아래 선(hline)·줄무늬(zebra): 미니홈피 색이면 PC판 미니홈피 표와 같은 하늘색 띠·민트 줄무늬 (theme.MH_TABLE)
+    const MH = { hdr: 'linear-gradient(#8FE6E6, #4BD5D5)', hline: '#2BB5B5', zebra: '#F0FBFA' };
+    const plain = { hdr: 'var(--surface-2)', zebra: 'var(--mint-row)' };
+    let r;
+    if (t === 'retro' || v === 'mh') r = Object.assign({ sub: '#FDF1E3', foot: '#ECE8F6', grp: mix(c.card, '#4BD5D5', 0.16), sep: '#5CC6C6', zero: '#B8B8B8' }, MH);
+    else if (t === 'basic') r = Object.assign({ sub: '#FDF1E3', foot: '#ECE8F6', grp: '#EEF2F7', sep: '#9AA4AE', zero: '#B8B8B8' }, plain, { hdr: 'var(--mint)' });
+    else if (v === 'dark') r = Object.assign({ sub: mix(c.card, c.accent, 0.2), foot: mix(c.card, c.accent, 0.34), grp: mix(c.card, c.ink, 0.1), sep: mix(c.card, c.ink, 0.42), zero: mix(c.card, c.ink, 0.36) }, plain);
+    else r = Object.assign({ sub: mix(c.card, c.accent, 0.09), foot: mix(c.card, c.accent, 0.18), grp: mix(c.card, c.ink, 0.045), sep: mix(c.card, c.ink, 0.32), zero: '#B8B8B8' }, plain);
+    if (!r.hline) r.hline = r.sep;
+    for (const k in r) document.body.style.setProperty('--rep-' + k, r[k]);
+    // 흰 글자를 얹는 수입·지출 단추 바탕: 테마 색을 흰 글자 대비 4.6:1 이 될 때까지 조금씩 어둡게 (어두운 테마의 밝은 분홍·하늘도)
+    const cs = getComputedStyle(document.body);
+    const strong = h => { let t = 0, x = h; while (t < 0.6 && 1.05 / (lum(x) + 0.05) < 4.6) { t += 0.04; x = mix(h, '#000000', t); } return x; };
+    for (const k of ['in', 'out']) {
+      const h = UI.normHex(cs.getPropertyValue('--' + k).trim());
+      if (h) document.body.style.setProperty(`--${k}-strong`, strong(h)); else document.body.style.removeProperty(`--${k}-strong`);
+    }
+    // 입력칸 테두리 (피드·타임라인): 바탕과 또렷이 구분되게 — PC판 theme.apply 의 input_line 과 같음
+    document.body.style.setProperty('--input-line', v === 'mh' ? mix(c.card, c.bg, 0.5) : v ? mix(c.card, c.ink, 0.38) : 'var(--line)');
   }
 
   // 테마: retro(미니홈피) · basic(기본) · 피드(사진 SNS 느낌)·타임라인(짧은 글 SNS 느낌) × 미니홈피 색/밝게/어둡게
@@ -158,6 +183,7 @@ const App = (() => {
     placeChrome();
     if (ui.content) drawNav();
     const c = applyColors(t);
+    applyTableColors(t);
     // 상태 표시줄 색: 미니홈피·미니홈피 색 SNS 테마는 진한 바탕색, 밝게·어둡게는 맨 위 줄(카드) 색
     const v = variantOf(t);
     let bar = v === 'dark' ? '#000000' : (v === 'light' ? '#FFFFFF' : '#24595A');
@@ -197,6 +223,12 @@ const App = (() => {
     ui.ledger.onclick = () => ledgerPicker();
     UI.$('.minimi').onclick = () => go('settings', { section: 'deco' });
     UI.$('.banner .tb-av').onclick = () => go('more');
+    // 아래로 내리는 동안 오른쪽 아래 ＋ 단추를 잠시 숨김 (목록 오른쪽 금액을 가리지 않게), 위로 올리면 다시
+    let lastTop = 0;
+    ui.content.addEventListener('scroll', () => {
+      const t = ui.content.scrollTop, d = t - lastTop;
+      if (Math.abs(d) > 6) { document.body.classList.toggle('fab-away', d > 0 && t > 40); lastTop = t; }
+    }, { passive: true });
     placeChrome();
   }
   /** 피드·타임라인: 장부 고르기 칸을 머리 줄(제목 띠)로, 그 밖의 테마는 맨 위 미니홈피 머리로 */
@@ -302,6 +334,7 @@ const App = (() => {
     const P = Pages[st.page];
     const top = keepScroll ? ui.content.scrollTop : 0;
     UI.$$('.fab').forEach(x => x.remove());
+    document.body.classList.remove('fab-away');
     ui.back.classList.toggle('hidden', !st.history.length);
     const lay = layoutOf(theme());
     const home = !st.history.length && st.page === tabKeys()[0];

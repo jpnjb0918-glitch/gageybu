@@ -14,7 +14,8 @@ from ..services import importer as I
 from ..services import ledger as L
 from ..services import order as O
 from ..util import CODE_CHARS, check_password, hash_password
-from .widgets import (CENTER, ask_order, button, cell, confirm, error, fill, h, info, make_table, selected_ids)
+from .widgets import (CENTER, ask_order, button, cell, confirm, error, fill, h, info, make_table, selected_ids,
+                      set_tone)
 
 
 class CategoryTab(QWidget):
@@ -27,7 +28,7 @@ class CategoryTab(QWidget):
         self.ct = make_table(['계정코드', '계정과목', '사용 건수'], stretch=1)
         self.info = QLabel('대분류 0번은 수입, 나머지(1~9, a~z)는 지출입니다. 계정코드 = 대분류 + 소분류 한 자리\n'
                            '순서는 입력할 때 고르는 목록과 결산 보고서에 그대로 쓰이고, 휴대폰판에서도 같습니다.')
-        self.info.setStyleSheet('color:#666')
+        set_tone(self.info, 'note')
         gbox = QGroupBox('대분류')
         gl = QVBoxLayout(gbox)
         gl.addWidget(self.gt)
@@ -356,7 +357,7 @@ class GeneralTab(QWidget):
         bl.addRow('불러오기', h(button('백업 파일로 복원하기…', self.restore), self.gd_load, 'stretch'))
         self.gd_lbl = QLabel()
         self.gd_lbl.setWordWrap(True)
-        self.gd_lbl.setStyleSheet('color:#777')
+        set_tone(self.gd_lbl, 'note')
         bl.addRow(self.gd_lbl)
         self.db_lbl = QLabel()
         self.db_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -658,7 +659,7 @@ class ThemeTab(QWidget):
         credit = QLabel('아늑단 이미지: 사용자가 넣어 준 스티커 시트에서 오려 낸 것 (assets/stickers)\n'
                         '글꼴 (모두 SIL Open Font License 1.1, assets/fonts/OFL-*.txt): 도트 글꼴 갈무리(Galmuri) · 고운돋움 · 주아 · 개구 · '
                         '서툰이야기 · 피드 로고 나눔손글씨 펜')
-        credit.setStyleSheet('color:#777')
+        set_tone(credit, 'note')
         lay = QVBoxLayout(self)
         lay.addWidget(box)
         lay.addWidget(obox)
@@ -675,7 +676,7 @@ class ThemeTab(QWidget):
     # ── 순서 ──
     def order_nav(self):
         app = self.page.app
-        names = {type(p).__name__: p.title for p in app.pages}
+        names = {c.__name__: c.title for c in app.page_classes}
         what, keys = ask_order(self, '메뉴 순서', [(k, names[k], '') for k in self.T.nav_order() if k in names],
                                '맨 위 메뉴가 프로그램을 켰을 때 처음 보이는 화면입니다.', '기본 순서로',
                                sub_for=lambda i, k: '← 처음 화면' if i == 0 else '')
@@ -812,7 +813,7 @@ class UpdateTab(QWidget):
                       '· 받은 설치 파일은 릴리스에 적힌 크기·SHA-256 과 맞을 때만 설치합니다.\n'
                       '· 윈도우 휴대용·직접 설치한 경우는 자동 설치가 되지 않아 내려받기 페이지를 엽니다.')
         note.setWordWrap(True)
-        note.setStyleSheet('color:#777')
+        set_tone(note, 'note')
         lay = QVBoxLayout(self)
         lay.addWidget(box)
         lay.addWidget(note)

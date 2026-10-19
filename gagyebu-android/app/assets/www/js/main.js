@@ -13,6 +13,10 @@ const App = (() => {
     contacts: ['주소록', 'a13'], diary: ['일기장', 'b33'], memo: ['메모장', 'a19'], settings: ['설정', 'b08'], help: ['도움말', 'b02'] };
   const NAV_TABS = 4;
   const MORE = ['더보기', 'a10'];
+  // 피드·타임라인 테마의 선 아이콘
+  const NAV_ICON = { ledger: 'home', calendar: 'calendar', report: 'report', assets: 'wallet', search: 'search', graph: 'chart', recurring: 'repeat',
+    anniv: 'gift', contacts: 'user', diary: 'book', memo: 'note', settings: 'gear', help: 'help', more: 'more' };
+  const navIcon = k => NAV_ICON[k] || 'dots';
   // 가계부 화면 구성: 덩어리 순서도 바꿀 수 있음
   const LAYOUT = { monthnav: '달 이동 (◀ 10월 ▶)', stories: '지출 많은 계정 동그라미 (피드 테마)', stats: '이달 수입·지출 요약', opts: '보기 설정 (전체 기간·최근 것 위로)', list: '내역 목록' };
   const st = { lid: null, page: 'ledger', params: {}, history: [], prefs: {} };
@@ -31,7 +35,9 @@ const App = (() => {
   const tabKeys = () => navOrder().slice(0, NAV_TABS).concat(['more']);
   const moreKeys = () => navOrder().slice(NAV_TABS);
   const navLabel = k => (k === 'more' ? MORE : NAV[k] || [k, 'b16']);
-  const ledgerLayout = () => keyOrder(prefJson('ledger_layout', []), Object.keys(LAYOUT));
+  // 순서를 따로 정하지 않았으면 테마에 맞는 기본 순서 (피드: 프로필 머리가 맨 위, 타임라인: 탭이 맨 위)
+  const LAYOUT_DEFAULT = { feed: ['stats', 'monthnav', 'stories', 'opts', 'list'], timeline: ['opts', 'monthnav', 'stats', 'stories', 'list'] };
+  const ledgerLayout = () => keyOrder(prefJson('ledger_layout', null) || LAYOUT_DEFAULT[layoutOf(theme())] || [], Object.keys(LAYOUT));
   function setPref(k, v) {
     if (v === null || v === undefined) delete st.prefs[k]; else st.prefs[k] = String(v);
     try { N.setPref(k, v === null || v === undefined ? null : String(v)); } catch (_) { /* 무시 */ }
@@ -114,9 +120,13 @@ const App = (() => {
   const theme = () => (THEMES.includes(pref('theme')) ? pref('theme') : 'retro');
   // 글자 크기: 1px 단위 (fontpx). 정하지 않았으면 예전 4단계(fontsize) 값 그대로
   const FS_MIN = 10, FS_MAX = 26;
+  // 고를 수 있는 무료 한글 글꼴 (SIL OFL 1.1, fonts/) — PC판 theme.EXTRA_FONTS 와 같은 열쇠. [이름, CSS 글꼴, 기본 크기]
+  const FONTS = { gowun: ['고운돋움 (부드러운 글씨)', "'Gowun Dodum'", 15], jua: ['주아 (동글동글)', "'Jua'", 15],
+    gaegu: ['개구 (손글씨)', "'Gaegu'", 18], poorstory: ['서툰이야기 (손글씨)', "'Poor Story'", 16] };
   function fontPx() {
     const v = parseInt(pref('fontpx'), 10);
     if (v >= FS_MIN && v <= FS_MAX) return v;
+    if (FONTS[pref('font')]) return FONTS[pref('font')][2];
     const sys = isSns() || pref('font') === 'system';
     return SIZES[sys ? 'system' : 'pixel'][pref('fontsize')] || (sys ? 15 : 14);
   }
@@ -137,11 +147,16 @@ const App = (() => {
     cl.toggle('tl', layoutOf(t) === 'timeline');
     cl.toggle('dark', variantOf(t) === 'dark');
     cl.toggle('mh', variantOf(t) === 'mh');
-    const sys = sns || pref('font') === 'system';        // SNS 테마는 휴대폰 기본 글꼴
+    const extra = FONTS[pref('font')];                  // 무료 한글 글꼴을 골랐으면 모든 테마에서 그 글꼴
+    const sys = !extra && (sns || pref('font') === 'system');        // SNS 테마는 휴대폰 기본 글꼴
     cl.toggle('sysfont', sys);
+    if (extra) document.body.style.setProperty('--font', `${extra[1]}, system-ui, 'Noto Sans KR', sans-serif`);
+    else document.body.style.removeProperty('--font');
     document.body.style.setProperty('--fs', fontPx() + 'px');
     const title = document.querySelector('.hompy-title');
     if (title) title.textContent = t === 'retro' ? '☆ 우리집 가계부 ☆' : '우리집 가계부';
+    placeChrome();
+    if (ui.content) drawNav();
     const c = applyColors(t);
     // 상태 표시줄 색: 미니홈피·미니홈피 색 SNS 테마는 진한 바탕색, 밝게·어둡게는 맨 위 줄(카드) 색
     const v = variantOf(t);
@@ -161,39 +176,48 @@ const App = (() => {
         <div class="line1">
           <div class="minimi"><img alt=""></div>
           <div class="grow"><div class="hompy-title">☆ 우리집 가계부 ☆</div><div class="hompy-sub"></div></div>
-          <select class="ledger-pick"></select>
+          <button class="ledger-pick" aria-haspopup="listbox" title="장부 고르기"><span class="lp-name"></span><span class="lp-dd">▾</span></button>
         </div>
         <div class="todaybar"><span class="pill"></span></div>
         <div class="marquee"><span></span></div>
       </div>
       <div class="main"><div class="card-main">
-        <div class="banner"><button class="back hidden">◀</button><img alt=""><div class="grow"><div class="t"></div><div class="s"></div></div><div class="tools"></div></div>
+        <div class="banner"><button class="tb-av" aria-label="더보기"><img alt=""></button><button class="back hidden" aria-label="뒤로">◀</button><img class="bimg" alt=""><div class="grow ttl"><div class="t"></div><div class="s"></div></div><span class="lp-slot"></span><div class="tools"></div><span class="add-slot"></span></div>
         <div class="content"></div>
       </div></div>
       <div class="navbar"></div>`;
     ui = {
       minimi: UI.$('.minimi img'), sub: UI.$('.hompy-sub'), ledger: UI.$('.ledger-pick'), pill: UI.$('.todaybar .pill'),
-      marquee: UI.$('.marquee'), mqText: UI.$('.marquee span'), back: UI.$('.banner .back'), bImg: UI.$('.banner img'),
+      marquee: UI.$('.marquee'), mqText: UI.$('.marquee span'), back: UI.$('.banner .back'), bImg: UI.$('.banner .bimg'), av: UI.$('.banner .tb-av img'),
+      line1: UI.$('.topbar .line1'), lpSlot: UI.$('.banner .lp-slot'),
       bT: UI.$('.banner .t'), bS: UI.$('.banner .s'), tools: UI.$('.banner .tools'), content: UI.$('.content'),
     };
     drawNav();
     ui.back.onclick = () => back();
-    ui.ledger.onchange = () => {
-      const v = ui.ledger.value;
-      if (v === '__new' || v === '__manage') {          // 목록 끝: 새 장부 만들기 / 장부 관리
-        ui.ledger.value = String(st.lid);
-        if (v === '__new') Pages.settings.newLedger(); else Pages.settings.ledgerSheet();
-        return;
-      }
-      selectLedger(Number(v));
-    };
+    ui.ledger.onclick = () => ledgerPicker();
     UI.$('.minimi').onclick = () => go('settings', { section: 'deco' });
+    UI.$('.banner .tb-av').onclick = () => go('more');
+    placeChrome();
+  }
+  /** 피드·타임라인: 장부 고르기 칸을 머리 줄(제목 띠)로, 그 밖의 테마는 맨 위 미니홈피 머리로 */
+  function placeChrome() {
+    if (!ui.ledger) return;
+    const want = isSns() ? ui.lpSlot : ui.line1;
+    if (ui.ledger.parentNode !== want) want.appendChild(ui.ledger);
   }
 
   function drawNav() {
     const nav = UI.$('.navbar');
     if (!nav) return;
-    nav.innerHTML = tabKeys().map(k => { const [label, s] = navLabel(k); return `<button data-tab="${k}"><img src="${UI.sticker(s)}" alt="">${label}</button>`; }).join('');
+    const sns = isSns();
+    nav.classList.toggle('icons', sns);
+    nav.innerHTML = tabKeys().map(k => {
+      const [label, s] = navLabel(k);
+      if (!sns) return `<button data-tab="${k}"><img src="${UI.sticker(s)}" alt="">${label}</button>`;
+      // 피드: 마지막 '더보기' = 내 미니미 동그라미 (프로필 탭처럼)
+      const face = k === 'more' && layoutOf(theme()) === 'feed' ? `<span class="me"><img src="${UI.sticker(pref('minimi'))}" alt=""></span>` : UI.icon(navIcon(k));
+      return `<button data-tab="${k}" aria-label="${U.esc(label)}" title="${U.esc(label)}">${face}<span class="lb">${U.esc(label)}</span></button>`;
+    }).join('');
     UI.on(nav, 'button', 'click', (e, b) => go(b.dataset.tab));
     UI.$$('.navbar button').forEach(b => b.classList.toggle('on', b.dataset.tab === tabOf(st.page)));
   }
@@ -215,8 +239,26 @@ const App = (() => {
   function reloadLedgers() {
     const ls = L.ledgers();
     if (!ls.some(l => l.id === st.lid)) st.lid = L.firstLedgerId();
-    ui.ledger.innerHTML = ls.map(l => `<option value="${l.id}"${l.id === st.lid ? ' selected' : ''}>${U.esc(l.name)}</option>`).join('') +
-      '<option disabled>──────────</option><option value="__new">＋ 새 장부 만들기</option><option value="__manage">장부 관리…</option>';
+    const cur = ls.find(l => l.id === st.lid);
+    UI.$('.lp-name', ui.ledger).textContent = cur ? cur.name : '';
+    ui.ledger.dataset.lid = String(st.lid);
+  }
+  /** 장부 고르기 창: 줄 높이가 모두 같은 목록 (장부들 · 구분선 · 새 장부 만들기 · 장부 관리) */
+  function ledgerPicker() {
+    const ls = L.ledgers();
+    const cnt = Object.fromEntries(DB.q('SELECT ledger_id AS l, COUNT(*) AS n FROM entry GROUP BY ledger_id').map(r => [r.l, r.n]));
+    const AV = ['#E8833A', '#E0525B', '#9457D6', '#3B7DDD', '#2E9E5B', '#139A9A', '#D24E8E', '#66788F'];
+    const face = name => { let h = 0; for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0; return `<span class="lp-av" style="background:${AV[h % AV.length]}">${U.esc(Array.from(name.trim())[0] || '?')}</span>`; };
+    const body = UI.el(`<ul class="lp-list">${ls.map(l => `<li data-lid="${l.id}" class="${l.id === st.lid ? 'on' : ''}">${face(l.name)}
+        <span class="nm"><b>${U.esc(l.name)}</b><small>내역 ${(cnt[l.id] || 0).toLocaleString('en-US')}건</small></span>
+        <span class="ck">${l.id === st.lid ? '✓' : ''}</span></li>`).join('')}
+      <li class="sep" aria-hidden="true"></li>
+      <li data-act="new"><span class="lp-ic">${UI.icon('add')}</span><span class="nm"><b>새 장부 만들기</b></span><span class="ck"></span></li>
+      <li data-act="manage"><span class="lp-ic">${UI.icon('gear')}</span><span class="nm"><b>장부 관리</b></span><span class="ck"></span></li></ul>`);
+    const sh = UI.sheet({ title: '장부 고르기', body });
+    UI.on(body, 'li[data-lid]', 'click', (e, li) => { sh.close(); const id = Number(li.dataset.lid); if (id !== st.lid) selectLedger(id); });
+    UI.on(body, 'li[data-act]', 'click', (e, li) => { sh.close(); if (li.dataset.act === 'new') Pages.settings.newLedger(); else Pages.settings.ledgerSheet(); });
+    return sh;
   }
   const ledgerName = () => { const l = L.ledgers().find(x => x.id === st.lid); return l ? l.name : ''; };
 
@@ -228,6 +270,7 @@ const App = (() => {
     const [inc, exp] = L.totals(st.lid, m0, m1);
     const [, texp] = L.totals(st.lid, t, t);
     ui.minimi.src = UI.sticker(pref('minimi'));
+    UI.$$('.navbar .me img, .banner .tb-av img').forEach(i => { i.src = UI.sticker(pref('minimi')); });
     ui.sub.textContent = `오늘의 기분: ${pref('mood')}`;
     ui.pill.innerHTML = `<b class="t">TODAY</b> ${UI.money(texp)} <span class="muted">|</span> <b class="m">이달</b> ${UI.money(exp)} <span class="muted">|</span> 잔액 ${UI.money(bal)}`;
     const motto = (pref('motto') || '').replace(/\n/g, ' ') || '오늘도 알뜰살뜰 (^-^)v';
@@ -260,8 +303,15 @@ const App = (() => {
     const top = keepScroll ? ui.content.scrollTop : 0;
     UI.$$('.fab').forEach(x => x.remove());
     ui.back.classList.toggle('hidden', !st.history.length);
-    ui.bImg.src = UI.sticker(P.sticker || 'b16');
-    ui.bT.textContent = typeof P.title === 'function' ? P.title(st.params) : P.title;
+    const lay = layoutOf(theme());
+    const home = !st.history.length && st.page === tabKeys()[0];
+    document.body.classList.toggle('home', home);
+    ui.back.innerHTML = lay ? UI.icon(lay === 'timeline' ? 'arrowleft' : 'back') : '◀';
+    ui.bImg.src = UI.sticker(lay === 'timeline' && home ? 'a01' : (P.sticker || 'b16'));
+    ui.av.src = UI.sticker(pref('minimi'));
+    const title = typeof P.title === 'function' ? P.title(st.params) : P.title;
+    if (lay === 'feed' && home) ui.bT.innerHTML = '<span class="logo">우리집 가계부</span>';
+    else ui.bT.textContent = title;
     ui.bS.textContent = P.sub || '';
     ui.tools.innerHTML = '';
     ui.content.innerHTML = '';
@@ -280,9 +330,12 @@ const App = (() => {
   /** 자료가 바뀌면 머리와 지금 화면을 다시 그림 (스크롤 위치 유지) */
   function dataChanged() { render(true); }
   function fab(onClick, label) {
-    const b = UI.el(`<button class="fab" aria-label="${U.esc(label || '추가')}">＋</button>`);
+    const lay = layoutOf(theme());
+    const b = UI.el(`<button class="fab" aria-label="${U.esc(label || '추가')}" title="${U.esc(label || '추가')}">${lay === 'feed' ? UI.icon('plus') : lay === 'timeline' ? UI.icon('add') : '＋'}</button>`);
     b.onclick = onClick;
-    document.body.appendChild(b);
+    // 피드: 머리 줄 오른쪽 ⊕ (사진 SNS 처럼) / 그 밖: 오른쪽 아래 둥근 단추
+    const slot = lay === 'feed' ? UI.$('.banner .add-slot') : null;
+    (slot || document.body).appendChild(b);
     return b;
   }
 
@@ -545,9 +598,9 @@ const App = (() => {
   }
 
   return {
-    MOODS, NAV, LAYOUT, st, pref, layoutOf, variantOf, fontPx, setFontPx, FS_MIN, FS_MAX, checkUpdate, downloadUpdate, askInstall, updState, setUpdAuto, onUpd, setPref, prefJson, applyTheme, theme, isSns, go, back, navOrder, moreKeys, navLabel,
+    MOODS, NAV, LAYOUT, st, pref, navIcon, FONTS, layoutOf, variantOf, fontPx, setFontPx, FS_MIN, FS_MAX, checkUpdate, downloadUpdate, askInstall, updState, setUpdAuto, onUpd, setPref, prefJson, applyTheme, theme, isSns, go, back, navOrder, moreKeys, navLabel,
     ledgerLayout, drawNav, navReorderSheet, layoutReorderSheet, COLOR_KEYS, baseColors, customColors, setCustomColor, render, dataChanged, fab, onBack, boot, reloadLedgers,
-    updateHeader, selectLedger, afterReplace, nativeAsync, checkRecurring, ledgerName,
+    updateHeader, selectLedger, afterReplace, ledgerPicker, nativeAsync, checkRecurring, ledgerName,
     get lid() { return st.lid; },
     get native() { return N; },
   };

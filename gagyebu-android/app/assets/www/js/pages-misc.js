@@ -7,7 +7,15 @@ Pages.more = {
     ord.onclick = () => App.navReorderSheet();
     tools.appendChild(ord);
     const tiles = App.moreKeys();
-    c.appendChild(UI.el(`<div class="tiles">${tiles.map(k => { const [l, st] = App.navLabel(k); return `<button class="tile" data-p="${k}"><img src="${UI.sticker(st)}" alt="">${l}</button>`; }).join('')}</div>`));
+    if (App.isSns()) {
+      // 피드·타임라인: 내 프로필 한 줄 + 아이콘 목록 (SNS 앱의 메뉴처럼)
+      c.appendChild(UI.el(`<div class="menu-me"><div class="ring"><img src="${UI.sticker(App.pref('minimi'))}" alt=""></div>
+        <div class="grow"><b>${U.esc(App.ledgerName())}</b><span class="small muted">오늘의 기분: ${U.esc(App.pref('mood'))}</span></div></div>`));
+      c.appendChild(UI.el(`<ul class="menu-list">${tiles.map(k => { const [l] = App.navLabel(k); return `<li class="tap" data-p="${k}">${UI.icon(App.navIcon(k))}<span class="nm">${U.esc(l)}</span>${UI.icon('chevr', 'go')}</li>`; }).join('')}</ul>`));
+      UI.$('.menu-me .ring', c).onclick = () => App.go('settings', { section: 'deco' }, true);
+    } else {
+      c.appendChild(UI.el(`<div class="tiles">${tiles.map(k => { const [l, st] = App.navLabel(k); return `<button class="tile" data-p="${k}"><img src="${UI.sticker(st)}" alt="">${l}</button>`; }).join('')}</div>`));
+    }
     UI.on(c, '[data-p]', 'click', (e, b) => App.go(b.dataset.p, {}, true));
   },
 };
@@ -197,8 +205,8 @@ Pages.help = {
   render(c) {
     c.appendChild(UI.el(`<div class="small" style="line-height:1.7">
       <div class="section-t">PC와 자료 주고받기</div>
-      <b>PC → 휴대폰</b><br>① PC판 설정 → 암호 · 백업 → <b>지금 백업하기</b>를 누르면 백업 폴더 안 backup(날짜) 폴더에 gagyebu.sqlite3 파일이 생깁니다.<br>② 그 파일을 휴대폰으로 옮깁니다 (USB, 카카오톡 나에게 보내기, 구글 드라이브 등).<br>③ 이 앱 설정 → 백업·복원 → <b>파일에서 가져오기</b>로 그 파일을 고릅니다.<br>
-      <b>휴대폰 → PC</b><br>① 이 앱 설정 → 백업·복원 → <b>파일로 내보내기</b>로 저장합니다.<br>② 그 파일을 PC로 옮긴 뒤 PC판 설정 → 암호 · 백업 → <b>백업 파일로 복원하기…</b>로 엽니다.<br>
+      <b>PC → 휴대폰</b><br>① PC판 설정 → 암호 · 백업 → <b>구글 드라이브에 저장</b> (또는 <b>카톡·디스코드로 보내기</b>, <b>다른 곳에 저장…</b>)<br>② 이 앱 설정 → 백업 불러오기 → <b>백업 파일 불러오기</b>로 그 파일을 고릅니다 (Google Drive·내 파일). 카톡으로 받았으면 카톡에서 저장한 뒤 내 파일에서 고르세요.<br>
+      <b>휴대폰 → PC</b><br>① 이 앱 설정 → 백업 → <b>백업 파일 저장</b>(내 파일·Google Drive 중 원하는 곳) 또는 <b>백업 파일 보내기</b>(카톡·디스코드 등)<br>② PC판 설정 → 암호 · 백업 → <b>구글 드라이브에서 복원…</b> 또는 <b>백업 파일로 복원하기…</b>로 엽니다.<br>
       <div class="muted">두 곳에서 따로 입력한 뒤 합치는 기능은 없습니다. 한쪽에서 입력하고 파일을 옮겨 이어서 쓰세요. 가져오기 전 자료는 앱 안에 자동 보관됩니다.</div>
       <div class="section-t">입력</div>
       · 가계부 화면의 ＋ 버튼으로 입력합니다. 품목을 예전과 같게 쓰면 계정이 자동으로 골라집니다.<br>

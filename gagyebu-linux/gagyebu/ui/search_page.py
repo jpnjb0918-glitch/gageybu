@@ -68,6 +68,19 @@ class SearchPage(QWidget):
         if self.table.rowCount():
             self.run()
 
+    def search_code(self, code, start=None, end=None):
+        """계정과목 하나(와 기간)로 바로 검색 (피드·타임라인의 계정 동그라미·트렌드에서)"""
+        self.c_date.setChecked(bool(start))
+        if start:
+            self.start.set_date(start)
+            self.end.set_date(end)
+        self.c_text.setChecked(False)
+        self.c_amt.setChecked(False)
+        self.codes = [code]
+        self.c_code.setChecked(True)
+        self._code_text()
+        self.run()
+
     def _code_text(self):
         self.code_lbl.setText(', '.join(self.codes) if self.codes else '(선택 안 함)')
 

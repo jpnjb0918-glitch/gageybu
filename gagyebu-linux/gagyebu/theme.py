@@ -125,6 +125,51 @@ def load_fonts():
     return _font_family or None
 
 
+# 고를 수 있는 한글 글꼴 (모두 SIL OFL 1.1 무료 글꼴, assets/fonts) — 안드로이드판 app.css 와 같은 글꼴
+EXTRA_FONTS = {
+    'gowun': ('고운돋움 (부드러운 글씨)', 'GowunDodum-Regular.ttf'),
+    'jua': ('주아 (동글동글)', 'Jua-Regular.ttf'),
+    'gaegu': ('개구 (손글씨)', 'Gaegu-Regular.ttf'),
+    'poorstory': ('서툰이야기 (손글씨)', 'PoorStory-Regular.ttf'),
+}
+_extra_family = {}
+
+
+def extra_family(key):
+    """추가 글꼴 등록 후 글꼴 이름 (없거나 실패하면 None)"""
+    if key not in EXTRA_FONTS:
+        return None
+    if key not in _extra_family:
+        i = QFontDatabase.addApplicationFont(os.path.join(ASSETS, 'fonts', EXTRA_FONTS[key][1]))
+        fams = QFontDatabase.applicationFontFamilies(i) if i >= 0 else []
+        _extra_family[key] = fams[0] if fams else ''
+    return _extra_family[key] or None
+
+
+def _font_for(font0):
+    """설정한 추가 글꼴이 있으면 그 글꼴 (크기는 그대로), 아니면 font0"""
+    fam = extra_family(pref('font'))
+    if not fam:
+        return font0
+    f = QFont(font0)
+    f.setFamily(fam)
+    f.setFamilies([fam] + [x for x in font0.families() if x != fam])     # 글꼴에 없는 글자는 원래 글꼴로
+    return f
+
+
+_logo_family = None
+
+
+def logo_family():
+    """피드 테마 손글씨 로고 글꼴 (나눔손글씨 펜 — '우리집 가계부' 글자만 담은 작은 파일, SIL OFL 1.1)"""
+    global _logo_family
+    if _logo_family is None:
+        i = QFontDatabase.addApplicationFont(os.path.join(ASSETS, 'fonts', 'NanumPenScript-logo.ttf'))
+        fams = QFontDatabase.applicationFontFamilies(i) if i >= 0 else []
+        _logo_family = fams[0] if fams else ''
+    return _logo_family or None
+
+
 # ── 스타일시트 ──
 def _url(name):
     return os.path.join(ASSETS, 'ui', name).replace('\\', '/')
@@ -320,39 +365,42 @@ def variant_of(theme):
 
 def _sns_entry(**c):
     """빠진 열쇠 채우기: 바탕 위 글자(on_bg)·메뉴 색은 카드와 같은 바탕이면 카드 글자색 그대로"""
-    c.setdefault('page', c['bg'])                 # 가계부 목록 뒤 (피드 카드 사이)
+    c.setdefault('page', c['card'])               # 가계부 목록 뒤
     c.setdefault('on_bg', c['ink'])               # 바탕 위 제목·메뉴 글자
     c.setdefault('on_bg2', c['muted'])
     c.setdefault('nav_hover', c['hover'])
     c.setdefault('nav_sel_bg', c['hover'])
+    c.setdefault('btn2', c['surface2'])           # 회색 단추 (사진 SNS 의 '프로필 편집' 단추 같은)
+    c.setdefault('fab', c['accent'])              # 쓰기 단추
     return c
 
 
 _TEAL, _TEAL_DARK = '#347C7C', '#24595A'
-_MH = dict(bg=_TEAL, card='#FFFFFF', surface='#FFFFFF', surface2='#F0FBFA', grid='#DCEEEE', ink='#1A1A1A',
-           muted='#6F8080', line='#BFE3DF', hover='#EAF9F7', scroll='#B8D8D5', dark=False,
-           on_bg='#FFFFFF', on_bg2='#B8EBE4', nav_hover='#4A8B8B', nav_sel_bg='#FFFFFF', navsel=_TEAL_DARK,
-           **{'in': '#1D5FBF', 'out': '#B8322A'})
+# 미니홈피 색 (기본): 청록 물방울 바탕 위 흰 화면, 분홍·하늘·노랑 포인트 (안드로이드판 app.css 와 같은 색)
+_MH = dict(bg=_TEAL, card='#FFFFFF', surface='#FFFFFF', surface2='#EAF6F5', grid='#E3F0EF', ink='#1A1A1A',
+           muted='#5F7373', line='#CFE6E3', hover='#EAF9F7', scroll='#B8D8D5', dark=False, btn2='#E3F4F2',
+           on_bg='#FFFFFF', on_bg2='#B8EBE4', nav_hover='#4A8B8B', nav_sel_bg='#4A8B8B', navsel='#FFFFFF',
+           **{'in': '#1F6FB2', 'out': '#D23F6E'})
 SNS = {
-    'feed': _sns_entry(**dict(_MH, page='#EAF9F7', sel='#FFE3EC', accent='#E0507A', accent2='#C93F68',
-                              ring=('#4BD5D5', '#FF8FB1', '#FFE066'))),
-    'feed_light': _sns_entry(bg='#FAFAFA', card='#FFFFFF', surface='#FFFFFF', surface2='#F6F6F6', grid='#EFEFEF',
-                             ink='#1F1F1F', muted='#8A8A8A', line='#E3E3E3', hover='#F1F1F1', sel='#FDEBF1',
-                             accent='#E5487E', accent2='#D13A6E', navsel='#1F1F1F', scroll='#D0D0D0',
-                             ring=('#FFB35C', '#FF5E7E', '#B85CFF'), dark=False, **{'in': '#2F6FDB', 'out': '#E0336A'}),
-    'feed_dark': _sns_entry(bg='#000000', card='#000000', surface='#121212', surface2='#1A1A1A', grid='#262626',
-                            ink='#F2F2F2', muted='#A0A0A0', line='#333333', hover='#1C1C1C', sel='#3A1424',
-                            accent='#F0568C', accent2='#F46F9C', navsel='#F2F2F2', scroll='#444444',
-                            ring=('#FFB35C', '#FF5E7E', '#B85CFF'), dark=True, **{'in': '#5B9BF5', 'out': '#F45C84'}),
-    'timeline': _sns_entry(**dict(_MH, page='#FFFFFF', sel='#DFF5F2', accent=_TEAL, accent2=_TEAL_DARK, ring=None)),
-    'timeline_light': _sns_entry(bg='#FFFFFF', card='#FFFFFF', surface='#FFFFFF', surface2='#F5F8FA', grid='#EBEFF2',
-                                 ink='#16191C', muted='#66737F', line='#E2E8EC', hover='#EEF3F6', sel='#E7F3FC',
-                                 accent='#1D8FE1', accent2='#1A7FC8', navsel='#1D8FE1', scroll='#CCD6DD',
-                                 ring=None, dark=False, **{'in': '#1D8FE1', 'out': '#E0336A'}),
-    'timeline_dark': _sns_entry(bg='#000000', card='#000000', surface='#0E1114', surface2='#15191D', grid='#23282D',
-                                ink='#E6E8EA', muted='#8B9096', line='#2C3238', hover='#16191C', sel='#0D2A40',
-                                accent='#2A9BEA', accent2='#3AA7F0', navsel='#E6E8EA', scroll='#3A4148',
-                                ring=None, dark=True, **{'in': '#52AEF2', 'out': '#F45C84'}),
+    'feed': _sns_entry(**dict(_MH, sel='#FFE3EC', accent='#E0507A', accent2='#C93F68',
+                              ring=('#FFE066', '#FF8FB1', '#4BD5D5'))),
+    'feed_light': _sns_entry(bg='#FFFFFF', card='#FFFFFF', surface='#FFFFFF', surface2='#EFEFEF', grid='#EFEFEF',
+                             ink='#111111', muted='#737373', line='#DBDBDB', hover='#F2F2F2', sel='#FDEBF1',
+                             accent='#E5487E', accent2='#D13A6E', navsel='#111111', scroll='#D0D0D0',
+                             ring=('#FFD15C', '#FF5E8A', '#A35CFF'), dark=False, **{'in': '#2F6FDB', 'out': '#E0336A'}),
+    'feed_dark': _sns_entry(bg='#000000', card='#000000', surface='#000000', surface2='#262626', grid='#262626',
+                            ink='#F5F5F5', muted='#A8A8A8', line='#363636', hover='#1A1A1A', sel='#3A1424',
+                            accent='#F0568C', accent2='#F46F9C', navsel='#F5F5F5', scroll='#444444', btn2='#363636',
+                            ring=('#FFD15C', '#FF5E8A', '#A35CFF'), dark=True, **{'in': '#5B9BF5', 'out': '#F45C84'}),
+    'timeline': _sns_entry(**dict(_MH, sel='#DFF5F2', accent='#2A8F8F', accent2=_TEAL_DARK, ring=None, fab='#E0507A')),
+    'timeline_light': _sns_entry(bg='#FFFFFF', card='#FFFFFF', surface='#FFFFFF', surface2='#F7F9F9', grid='#EFF3F4',
+                                 ink='#0F1419', muted='#536471', line='#EFF3F4', hover='#F2F4F5', sel='#E8F5FD',
+                                 accent='#1D9BF0', accent2='#1A8CD8', navsel='#0F1419', scroll='#CCD6DD', btn2='#EFF3F4',
+                                 ring=None, dark=False, **{'in': '#1D9BF0', 'out': '#F4212E'}),
+    'timeline_dark': _sns_entry(bg='#000000', card='#000000', surface='#000000', surface2='#16181C', grid='#2F3336',
+                                ink='#E7E9EA', muted='#71767B', line='#2F3336', hover='#181919', sel='#0A2A40',
+                                accent='#1D9BF0', accent2='#3AA7F0', navsel='#E7E9EA', scroll='#3A4148', btn2='#202327',
+                                ring=None, dark=True, **{'in': '#4CB0F5', 'out': '#F4556A'}),
 }
 AV_COLORS = ('#E8833A', '#E0525B', '#9457D6', '#3B7DDD', '#2E9E5B', '#139A9A', '#D24E8E', '#66788F')
 
@@ -363,17 +411,40 @@ QWidget { color: %(ink)s; }
 QToolTip { background: %(ink)s; color: %(card)s; border: none; border-radius: 6px; padding: 4px 8px; }
 QStatusBar { background: %(card)s; color: %(muted)s; border-top: 1px solid %(line)s; }
 QStatusBar QLabel { color: %(muted)s; }
-QFrame#Hompy, QFrame#MainBox { background: %(card)s; border: none; }
+QFrame#Hompy { background: transparent; border: none; }
+QFrame#MainBox { background: %(card)s; border: none; %(mainbox_extra)s }
 QFrame#MainBox QScrollArea, QFrame#MainBox QStackedWidget { background: transparent; }
 QLabel#HompyTitle { color: %(on_bg)s; font-size: 15pt; font-weight: 800; }
 QLabel#TodayLabel { background: %(surface2)s; border-radius: 12px; padding: 3px 12px; }
 QLabel#LedgerLabel { color: %(on_bg2)s; }
 
-/* 왼쪽 메뉴 */
-QListWidget#TabNav { background: transparent; border: none; outline: none; font-size: 11pt; }
-QListWidget#TabNav::item { padding: 9px 14px; margin: 1px 0px; border-radius: 19px; color: %(on_bg)s; }
+/* 왼쪽 메뉴 (SNS 앱의 왼쪽 줄: 로고 · 아이콘 메뉴 · 쓰기 · 내 프로필) */
+QWidget#SnsRail { background: %(rail_bg)s; %(rail_extra)s }
+QLabel#RailLogo { color: %(on_bg)s; padding: 4px 10px 10px 12px; }
+QLabel#RailName { color: %(on_bg)s; font-weight: 700; }
+QLabel#RailSub { color: %(on_bg2)s; }
+QListWidget#TabNav { background: transparent; border: none; outline: none; font-size: 12pt; }
+QListWidget#TabNav::item { padding: 9px 10px; margin: 2px 0px; border-radius: 10px; color: %(on_bg)s; }
 QListWidget#TabNav::item:hover { background: %(nav_hover)s; }
-QListWidget#TabNav::item:selected { background: %(nav_sel_bg)s; color: %(navsel)s; }
+QListWidget#TabNav::item:selected { background: transparent; color: %(on_bg)s; font-weight: 800; }
+QPushButton#RailCompose { background: %(fab)s; color: white; border: none; border-radius: 23px; min-height: 34px;
+    font-size: 12pt; font-weight: 800; }
+QPushButton#RailCompose:hover { background: %(accent2)s; }
+QPushButton#RailCreate { background: transparent; color: %(on_bg)s; border: none; border-radius: 10px; text-align: left;
+    padding: 9px 10px; font-size: 12pt; font-weight: 400; }
+QPushButton#RailCreate:hover { background: %(nav_hover)s; }
+QComboBox#RailLedger { background: %(rail_combo)s; color: %(ink)s; border: none; border-radius: 14px; padding: 5px 12px;
+    font-weight: 700; }
+QComboBox#RailLedger QAbstractItemView { background: %(surface)s; color: %(ink)s; border: 1px solid %(line)s; font-weight: 400;
+    selection-background-color: %(hover)s; selection-color: %(ink)s; }
+QLabel#SnsTitle { font-size: 15pt; font-weight: 800; padding: 10px 16px 8px 16px; background: %(card)s;
+    border-bottom: 1px solid %(line)s; }
+QWidget#SnsCol { background: %(card)s; }
+QFrame#SnsSide { background: transparent; }
+QPushButton#SnsGray { background: %(btn2)s; border: none; border-radius: 8px; padding: 6px 12px; font-weight: 600; }
+QPushButton#SnsGray:hover { background: %(line)s; }
+QToolButton#SnsTool { border-radius: 8px; padding: 5px; }
+QToolButton#SnsTool:hover { background: %(hover)s; }
 
 /* 버튼: 둥근 알약 모양 */
 QPushButton { background: %(surface)s; color: %(ink)s; border: 1px solid %(line)s; border-radius: 15px;
@@ -396,6 +467,7 @@ QTextEdit:focus, QPlainTextEdit:focus { border: 1px solid %(accent)s; }
 QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QSpinBox:disabled { color: %(muted)s; background: %(surface2)s; }
 QComboBox QAbstractItemView { background: %(surface)s; color: %(ink)s; border: 1px solid %(line)s;
     selection-background-color: %(hover)s; selection-color: %(ink)s; outline: none; }
+QComboBox QAbstractItemView::item { min-height: 28px; padding: 0 8px; }
 QComboBox, QDateEdit { padding-right: 22px; }
 QComboBox::drop-down, QDateEdit::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 22px;
     border: none; background: transparent; }
@@ -447,6 +519,8 @@ QCalendarWidget QToolButton { color: %(ink)s; font-weight: bold; }
 QCalendarWidget QAbstractItemView { background: %(surface)s; color: %(ink)s; selection-background-color: %(accent)s;
     selection-color: white; border: none; }
 QLabel#MonthLabel { font-size: 13pt; font-weight: bold; }
+QWidget#MonthNav QPushButton { background: %(btn2)s; border: none; border-radius: 8px; min-height: 22px; }
+QWidget#MonthNav QPushButton:hover { background: %(line)s; }
 QLabel#DayLabel { font-weight: bold; font-size: 12pt; }
 QLabel#SumLabel { background: %(surface2)s; border-radius: 10px; padding: 8px; }
 
@@ -591,9 +665,10 @@ def _sns_colors(theme):
                  'hover': hover, 'sel': mix(card, acc, 0.15), 'accent2': mix(acc, '#000000', 0.1),
                  'navsel': ink if sep else (acc if theme == 'timeline_light' else ink),
                  'scroll': mix(card, ink, 0.25), 'dark': dark,
-                 'page': (mix(card, bg, 0.1) if sep else bg) if feed else card,
+                 'page': card, 'btn2': mix(card, bg if sep else ink, 0.1 if sep else 0.08),
+                 'fab': base.get('fab', acc) if 'accent' not in cu else acc,
                  'on_bg': on_bg, 'on_bg2': mix(on_bg, bg, 0.3), 'nav_hover': mix(bg, on_bg, 0.12) if sep else hover,
-                 'nav_sel_bg': card if sep else hover})
+                 'nav_sel_bg': mix(bg, on_bg, 0.12) if sep else hover})
     if feed and 'accent' in cu:
         base['ring'] = (mix(acc, '#FFC861', 0.55), acc, mix(acc, '#8B5CF6', 0.55))
     return base
@@ -635,8 +710,8 @@ def _basic_palette(pal0):
 # ── 순서 (이 PC에만 저장) ──
 NAV_PAGES = ('LedgerPage', 'SearchPage', 'ReportsPage', 'GraphPage', 'RecurringPage', 'AssetsPage', 'CalendarPage',
              'AddressPage', 'DiaryPage', 'MemoPage', 'SettingsPage')
-LEDGER_PARTS = (('nav', '달 이동·단추 줄'), ('stories', '지출 많은 계정 동그라미 (피드 테마)'), ('table', '내역 목록'),
-                ('summary', '이달의 현황 줄'))
+LEDGER_PARTS = (('nav', '달 이동·단추 줄'), ('stories', '지출 많은 계정 동그라미 (피드) · 많이 쓴 곳 (타임라인)'), ('table', '내역 목록'),
+                ('summary', '이달의 현황 (피드: 프로필 머리, 타임라인: 고정된 글)'))
 
 
 def _key_order(saved, all_keys):
@@ -652,9 +727,13 @@ def set_nav_order(keys):
     set_pref('nav_order', json.dumps(list(keys)) if keys else '')
 
 
+# 순서를 따로 정하지 않았으면 테마에 맞는 기본 순서 (피드: 프로필 머리가 맨 위 / 타임라인: 달 이동 → 고정된 글)
+LEDGER_DEFAULT = {'feed': ['summary', 'nav', 'stories', 'table'], 'timeline': ['nav', 'summary', 'stories', 'table']}
+
+
 def ledger_layout():
     keys = [k for k, _l in LEDGER_PARTS]
-    return _key_order(_json_pref('ledger_layout', []), keys)
+    return _key_order(_json_pref('ledger_layout', []) or LEDGER_DEFAULT.get(layout_of(current()[0]), []), keys)
 
 
 def set_ledger_layout(keys):
@@ -829,7 +908,7 @@ def apply(app=None):
             f.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
             app.setFont(_with_px(f))
         else:
-            app.setFont(_with_px(font0))
+            app.setFont(_with_px(_font_for(font0)))
         app.setStyleSheet(retro_qss(pixel))
     elif theme in SNS_THEMES:
         c = sns_colors(theme)
@@ -837,16 +916,21 @@ def apply(app=None):
         if fusion is not None:
             app.setStyle(fusion)
         app.setPalette(sns_palette(c))
-        app.setFont(_with_px(font0))
+        app.setFont(_with_px(_font_for(font0)))
         tag = 'light' if c['dark'] else 'grey'
+        mh = variant_of(theme) == 'mh'
+        extra = dict(rail_bg='transparent' if mh else c['card'],
+                     rail_extra='' if mh else f"border-right: 1px solid {c['line']};",
+                     mainbox_extra='border-top-left-radius: 18px; border-bottom-left-radius: 18px;' if mh else '',
+                     rail_combo=c['card'] if mh else c['btn2'])     # 장부 고르기: 흰 알약 (펼친 목록 글자도 진하게)
         app.setStyleSheet(SNS_QSS % dict(c, check=_url('check-white.png'), chev_down=_url(f'chev-down-{tag}.png'),
-                                         chev_up=_url(f'chev-up-{tag}.png')))
+                                         chev_up=_url(f'chev-up-{tag}.png'), **extra))
     else:
         st = QStyleFactory.create(style0)
         if st is not None:
             app.setStyle(st)
         app.setPalette(_basic_palette(pal0))
-        app.setFont(_with_px(font0))
+        app.setFont(_with_px(_font_for(font0)))
         app.setStyleSheet(BASIC_QSS)
     _pix_cache.clear()
     from .ui import widgets as _w          # 표의 수입·지출 글자색, 소계 배경색

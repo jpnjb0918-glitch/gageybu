@@ -3,7 +3,8 @@ import os
 import shutil
 import tempfile
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QMimeData, Qt, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QInputDialog,
                              QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
@@ -345,7 +346,18 @@ class GeneralTab(QWidget):
         bl = QFormLayout(bk)
         bl.addRow('백업 폴더', h(self.bk_dir, button('찾기…', self._pick_dir)))
         bl.addRow(self.bk_exit)
-        bl.addRow(h(button('지금 백업하기', self.backup), button('백업 파일로 복원하기…', self.restore), 'stretch'))
+        self.gd_save = button('구글 드라이브에 저장', self.backup_gdrive)
+        self.gd_load = button('구글 드라이브에서 복원…', lambda: self.restore(self._gdrive()))
+        bl.addRow('백업', h(button('지금 백업하기', self.backup, '위의 백업 폴더에 날짜별로 저장'),
+                            button('다른 곳에 저장…', self.backup_as, '저장할 폴더·파일 이름을 직접 고르기 (USB·구글 드라이브 폴더 등)'),
+                            self.gd_save, button('카톡·디스코드로 보내기', self.backup_send,
+                                                 '백업 파일을 만들어 복사해 두고 폴더를 엽니다 → 대화창에 붙여넣기(Ctrl+V) 또는 끌어다 놓기'),
+                            'stretch'))
+        bl.addRow('불러오기', h(button('백업 파일로 복원하기…', self.restore), self.gd_load, 'stretch'))
+        self.gd_lbl = QLabel()
+        self.gd_lbl.setWordWrap(True)
+        self.gd_lbl.setStyleSheet('color:#777')
+        bl.addRow(self.gd_lbl)
         self.db_lbl = QLabel()
         self.db_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lay = QVBoxLayout(self)
@@ -366,6 +378,14 @@ class GeneralTab(QWidget):
         self.bk_exit.setChecked(bool(db.get_meta(self.con, 'backup_on_exit')))
         self.bk_exit.blockSignals(False)
         self.db_lbl.setText(f'데이터 파일: {self.page.app.db_path}')
+        gd = self._gdrive()
+        self.gd_save.setEnabled(bool(gd))
+        self.gd_load.setEnabled(bool(gd))
+        tip = ('구글 드라이브 폴더를 찾지 못했습니다. PC용 Google Drive 앱(드라이브 데스크톱)을 설치하면 생기는 폴더'
+               '(보통 G:\\내 드라이브)에 저장하면 휴대폰에서도 드라이브 앱으로 받을 수 있습니다. [다른 곳에 저장…]으로 직접 골라도 됩니다.')
+        for b in (self.gd_save, self.gd_load):
+            b.setToolTip(f'구글 드라이브 폴더: {gd}' if gd else tip)
+        self.gd_lbl.setText(f'· 구글 드라이브 폴더: {gd} — 여기에 저장한 백업은 휴대폰 드라이브 앱에서도 보입니다.' if gd else '· ' + tip)
 
     def set_pw(self):
         cur = db.get_meta(self.con, 'password')
@@ -424,8 +444,66 @@ class GeneralTab(QWidget):
         except OSError as e:
             error(self, f'백업 실패: {e}')
 
-    def restore(self):
-        p, _ = QFileDialog.getOpenFileName(self, '복원할 백업 파일', self.bk_dir.text(), '가계부 데이터 (*.sqlite3)')
+    def _gdrive(self):
+        ds = B.google_drive_dirs()
+        return ds[0] if ds else ''
+
+    def _save_copy(self, path):
+        try:
+            B.backup_to_file(self.con, path)
+            return path
+        except (OSError, Exception) as e:          # 드라이브·USB 쪽 오류도 알림으로
+            error(self, f'백업 실패: {e}')
+            return None
+
+    def backup_as(self, start_dir=None):
+        start = os.path.join(start_dir or self._gdrive() or self.bk_dir.text(), B.backup_name())
+        p, _ = QFileDialog.getSaveFileName(self, '백업 파일 저장 (폴더를 마음대로 고르기)', start, '가계부 데이터 (*.sqlite3)')
+        if not p:
+            return None
+        if not p.lower().endswith('.sqlite3'):
+            p += '.sqlite3'
+        if self._save_copy(p):
+            info(self, f'백업했습니다:\n{p}')
+            return p
+        return None
+
+    def backup_gdrive(self):
+        gd = self._gdrive()
+        if not gd:
+            return self.backup_as()
+        p = os.path.join(gd, '우리집가계부_백업', B.backup_name())
+        if self._save_copy(p):
+            info(self, f'구글 드라이브 폴더에 백업했습니다:\n{p}\n\nGoogle Drive 앱이 인터넷으로 올리면 휴대폰 드라이브 앱에서도 보입니다.')
+            return p
+        return None
+
+    def backup_send(self):
+        """카톡·디스코드로 보내기: 백업 파일을 만들어 클립보드에 복사(파일) + 그 폴더 열기"""
+        d = os.path.join(tempfile.gettempdir(), '우리집가계부_보내기')
+        os.makedirs(d, exist_ok=True)
+        for f in os.listdir(d):                         # 지난번 사본 정리
+            try:
+                os.remove(os.path.join(d, f))
+            except OSError:
+                pass
+        p = self._save_copy(os.path.join(d, B.backup_name()))
+        if not p:
+            return None
+        md = QMimeData()
+        md.setUrls([QUrl.fromLocalFile(p)])
+        QApplication.clipboard().setMimeData(md)
+        if os.name == 'nt':
+            import subprocess
+            subprocess.Popen(['explorer', '/select,', os.path.normpath(p)])
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(d))
+        info(self, '백업 파일을 만들어 복사해 두었습니다.\n\n카카오톡·디스코드 대화창에서 붙여넣기(Ctrl+V) 하거나, '
+                   f'열린 폴더의 파일을 대화창으로 끌어다 놓으세요.\n\n{p}')
+        return p
+
+    def restore(self, start_dir=None):
+        p, _ = QFileDialog.getOpenFileName(self, '복원할 백업 파일', start_dir or self.bk_dir.text(), '가계부 데이터 (*.sqlite3)')
         if not p:
             return
         if not B.validate_db(p):
@@ -534,6 +612,8 @@ class ThemeTab(QWidget):
         self.font = QComboBox()
         self.font.addItem('도트 글꼴 (갈무리11)', 'pixel')
         self.font.addItem('시스템 글꼴', 'system')
+        for k, (label, _f) in T.EXTRA_FONTS.items():          # 무료 한글 글꼴 (모든 테마에서)
+            self.font.addItem(label, k)
         self.marquee = QCheckBox('맨 위 전광판 글씨 흐르게 하기')
         self.minimi = QLabel()
         self.minimi.setFixedSize(110, 100)
@@ -576,7 +656,8 @@ class ThemeTab(QWidget):
         self.note = QLabel()
         self.note.setWordWrap(True)
         credit = QLabel('아늑단 이미지: 사용자가 넣어 준 스티커 시트에서 오려 낸 것 (assets/stickers)\n'
-                        '도트 글꼴: 갈무리(Galmuri) — SIL Open Font License 1.1 (assets/fonts/OFL-Galmuri.txt)')
+                        '글꼴 (모두 SIL Open Font License 1.1, assets/fonts/OFL-*.txt): 도트 글꼴 갈무리(Galmuri) · 고운돋움 · 주아 · 개구 · '
+                        '서툰이야기 · 피드 로고 나눔손글씨 펜')
         credit.setStyleSheet('color:#777')
         lay = QVBoxLayout(self)
         lay.addWidget(box)
@@ -659,12 +740,13 @@ class ThemeTab(QWidget):
             w.blockSignals(False)
         self._draw_colors()
         retro = T.pref('theme') == 'retro'
-        self.font.setEnabled(retro)
+        self.font.setEnabled(True)                     # 추가 글꼴은 모든 테마에서 (도트 글꼴만 미니홈피 전용)
         self.marquee.setEnabled(retro)
         self.minimi.setPixmap(T.sticker_pixmap(T.pref('minimi'), 96))
         fam = T.load_fonts()
-        self.note.setText('· 바꾸면 바로 적용됩니다. 글꼴·전광판은 미니홈피 테마에서만 쓰입니다.\n'
-                          '· 피드·타임라인 테마는 가계부 목록이 카드·타임라인 모양으로 바뀝니다. 기능은 같습니다.\n'
+        self.note.setText('· 바꾸면 바로 적용됩니다. 전광판과 도트 글꼴은 미니홈피 테마에서만 쓰입니다.\n'
+                          '· 고운돋움·주아·개구·서툰이야기는 모든 테마에서 쓰입니다 (무료 글꼴, SIL OFL 1.1).\n'
+                          '· 피드·타임라인 테마는 화면이 SNS 앱처럼 바뀝니다 (게시물·짧은 글 모양). 기능은 같습니다.\n'
                           '· 프로필의 ◀ 단추로 프로필을 접을 수 있습니다 (좁은 화면에서 유용).'
                           + ('' if fam else '\n· 도트 글꼴 파일을 불러오지 못해 시스템 글꼴을 씁니다.'))
 

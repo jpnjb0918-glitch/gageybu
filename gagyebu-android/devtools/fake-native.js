@@ -117,6 +117,8 @@
       openExternal(u) { st.external.push(u); },
       exitApp() { st.exited = true; },
       exportDb(name, cb) { st.exported = { name, bytes: Array.from(dump()) }; later(cb, { ok: true, size: st.exported.bytes.length }); },
+      shareDb(name, cb) { st.shared = { name, bytes: Array.from(dump()) }; later(cb, { ok: true, size: st.shared.bytes.length }); },
+      importDbVia(cb) { st.via = (st.via || 0) + 1; this.importDb(cb); },
       importDb(cb) {
         const b = window.__importBytes;
         if (!b) { later(cb, { ok: false, cancel: true }); return; }

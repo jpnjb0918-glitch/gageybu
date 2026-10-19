@@ -5,36 +5,66 @@ Pages.settings = (() => {
   for (let i = 1; i <= 22; i++) STICKERS.push('a' + U.pad(i));
   for (let i = 1; i <= 40; i++) STICKERS.push('b' + U.pad(i));
 
+  // 설정 첫 화면 = 묶음별 목록 (아이콘 · 이름 · 지금 값 · ›). 꾸미기·프로필·업데이트는 따로 들어가는 화면
+  const SECTIONS = { deco: '화면 꾸미기', profile: '내 프로필', update: '업데이트' };
+  const THEME_NAMES = { retro: '미니홈피', basic: '기본', feed: '피드 · 미니홈피 색', feed_light: '피드 · 밝게', feed_dark: '피드 · 어둡게',
+    timeline: '타임라인 · 미니홈피 색', timeline_light: '타임라인 · 밝게', timeline_dark: '타임라인 · 어둡게' };
+  const grp = (title, body, note, pad) => `<section class="sgroup"><h3 class="sgroup-t">${title}</h3><div class="sgroup-b${pad ? ' pad' : ''}">${body}</div>${note ? `<p class="sgroup-n">${note}</p>` : ''}</section>`;
+  const row = (a, ic, label, val, cls) => `<button class="srow${cls ? ' ' + cls : ''}" data-a="${a}">${UI.icon(ic)}<span class="nm">${label}</span>${val ? `<span class="val">${U.esc(val)}</span>` : ''}${UI.icon('chevr', 'go')}</button>`;
+
   function render(c, p) {
-    const sec = (title, html) => `<div class="section-t">${title}</div><div class="box">${html}</div>`;
+    const section = p && p.section;
+    if (section === 'deco') { renderDeco(c); return; }
+    if (section === 'profile') { renderProfile(c); return; }
+    if (section === 'update') { renderUpdate(c); return; }
     const hasPw = !!DB.getMeta('password');
-    c.appendChild(UI.el(`<div>
-      ${sec('장부·계정', `<div class="row wrap"><button class="btn sm" data-a="ledgers">장부 관리</button><button class="btn sm" data-a="codes">계정과목</button>
-        <button class="btn sm" data-a="items">품목 자동완성</button><button class="btn sm" data-a="settle">결산일 ${Rep.settleDay()}일</button></div>`)}
-      ${sec('백업 · 복원 (PC와 주고받기)', `<div class="small muted" style="margin-bottom:6px">PC판과 같은 형식의 자료 파일(.sqlite3)을 그대로 주고받습니다.</div>
-        <div class="row wrap"><button class="btn sm pri" data-a="export">파일로 내보내기</button><button class="btn sm" data-a="import">파일에서 가져오기</button>
-        <button class="btn sm" data-a="kept">앱 안 보관본</button></div>`)}
-      ${sec('CSV (엑셀)', `<div class="row wrap"><button class="btn sm" data-a="csvout">내역 CSV로 저장</button><button class="btn sm" data-a="csvin">CSV 내역 불러오기</button></div>
-        <div class="small muted" style="margin-top:6px">불러오기 형식: 날짜, 품목, 수입, 지출, 계정코드[, 계정과목, 메모]</div>`)}
-      ${sec('시작 암호', `<div class="small" style="margin-bottom:6px">${hasPw ? '암호가 설정되어 있습니다.' : '암호가 없습니다.'}</div>
-        <div class="row wrap"><button class="btn sm" data-a="pw">${hasPw ? '암호 변경' : '암호 설정'}</button>${hasPw ? '<button class="btn sm" data-a="pwoff">암호 해제</button>' : ''}</div>`)}
-      <div id="deco"></div>
-      ${sec('화면 꾸미기', decoHtml())}
-      <div id="upd"></div>
-      ${sec('업데이트', '<div class="updbox"></div>')}
-      ${sec('앱 정보', infoHtml())}
+    c.appendChild(UI.el(`<div class="settings">
+      <button class="sme" data-a="profile"><img src="${UI.sticker(App.pref('minimi'))}" alt=""><span class="nm"><b>${U.esc(App.ledgerName())}</b>
+        <small>오늘의 기분: ${U.esc(App.pref('mood'))}</small></span>${UI.icon('chevr', 'go')}</button>
+      ${grp('장부', row('ledgers', 'book', '장부 관리', `${L.ledgers().length}개`) + row('codes', 'tag', '계정과목') + row('items', 'pen', '품목 자동완성')
+        + row('settle', 'calendar', '결산일', `${Rep.settleDay()}일`))}
+      ${grp('화면', row('deco', 'palette', '화면 꾸미기', THEME_NAMES[App.theme()]) + row('profile', 'user', '내 프로필', '미니미 · 기분 · 한마디'))}
+      ${grp('백업 (PC와 주고받기)', row('export', 'upload', '백업 파일 저장', '내 파일 · 구글 드라이브') + row('share', 'send', '백업 파일 보내기', '카톡 · 디스코드 등'),
+        '저장: 저장 창 왼쪽 위 ☰ 를 누르면 내 파일(내장 메모리·다운로드 등 원하는 폴더)이나 Google Drive 를 고를 수 있습니다. 보내기: 카카오톡·디스코드·메일 등 고른 앱으로 파일을 보냅니다.')}
+      ${grp('백업 불러오기', row('import', 'download', '백업 파일 불러오기', '내 파일 · 구글 드라이브') + row('importapp', 'archive', '다른 앱에서 불러오기', '내 파일 앱 등')
+        + row('kept', 'refresh', '앱 안 보관본', '하루 한 번 자동'),
+        '불러오면 지금 자료를 백업 파일 내용으로 바꿉니다 (지금 자료는 앱 안 보관본에 남김). Google Drive 는 휴대폰에 드라이브 앱이 있어야 보입니다. 카톡으로 받은 파일은 카톡에서 저장한 뒤 내 파일에서 고르세요.')}
+      ${grp('CSV (엑셀)', row('csvout', 'table', '내역 CSV로 저장') + row('csvin', 'download', 'CSV 내역 불러오기'), '불러오기 형식: 날짜, 품목, 수입, 지출, 계정코드[, 계정과목, 메모]')}
+      ${grp('보안', row('pw', 'lock', hasPw ? '시작 암호 바꾸기' : '시작 암호 정하기', hasPw ? '설정됨' : '없음') + (hasPw ? row('pwoff', 'lock', '시작 암호 해제', '', 'danger') : ''))}
+      ${grp('앱', row('update', 'refresh', '업데이트', App.updState().latest ? `새 버전 ${App.updState().latest.version}` : `지금 판 ${App.updState().version || '?'}`)
+        + row('info', 'info', '앱 정보'))}
     </div>`));
+    const sub = k => () => App.go('settings', { section: k }, true);
     const act = {
       ledgers: ledgerSheet, codes: () => App.go('codes', {}, true), items: itemSheet, settle: settleSheet,
-      export: exportDb, import: importDb, kept: keptSheet, csvout: csvOut, csvin: csvIn, pw: pwSheet, pwoff: pwOff,
+      export: exportDb, share: shareDb, import: () => importDb(false), importapp: () => importDb(true), kept: keptSheet, csvout: csvOut, csvin: csvIn, pw: pwSheet, pwoff: pwOff,
+      deco: sub('deco'), profile: sub('profile'), update: sub('update'), info: () => UI.sheet({ title: '앱 정보', body: infoHtml() }),
     };
     UI.on(c, '[data-a]', 'click', (e, b) => act[b.dataset.a]());
+  }
+  function renderDeco(c) {
+    c.appendChild(UI.el(`<div class="settings">${decoHtml()}</div>`));
     bindDeco(c);
+  }
+  function renderProfile(c) {
+    c.appendChild(UI.el(`<div class="settings">
+      ${grp('미니미 (맨 위·프로필 그림)', `<div class="stickers">${STICKERS.map(s => `<button data-st="${s}"><img src="${UI.sticker(s)}" alt="" loading="lazy"></button>`).join('')}</div>`, '', true)}
+      ${grp('오늘의 기분', `<select class="inp" data-p="mood">${App.MOODS.map(m => `<option>${U.esc(m)}</option>`).join('')}</select>`, '', true)}
+      ${grp('한마디', `<input class="inp" type="text" data-p="motto" placeholder="오늘도 알뜰살뜰 (^-^)v">`, '미니홈피 테마는 맨 위 전광판에, 피드·타임라인 테마는 가계부 프로필에 나옵니다.', true)}</div>`));
+    bindPrefs(c);
+    const cur = App.pref('minimi');
+    UI.$$('[data-st]', c).forEach(b => b.classList.toggle('on', b.dataset.st === cur));
+    UI.on(c, '[data-st]', 'click', (e, b) => {
+      App.setPref('minimi', b.dataset.st);
+      UI.$$('[data-st]', c).forEach(x => x.classList.toggle('on', x === b));
+      App.updateHeader();
+    });
+  }
+  function renderUpdate(c) {
+    c.appendChild(UI.el(`<div class="settings">${grp('새 버전', '<div class="updbox"></div>', '', true)}</div>`));
     const ub = UI.$('.updbox', c);
     drawUpd(ub);
     App.onUpd(() => { if (ub.isConnected) drawUpd(ub); });
-    if (p && p.section === 'deco') setTimeout(() => UI.$('#deco').scrollIntoView(), 50);
-    if (p && p.section === 'update') setTimeout(() => UI.$('#upd').scrollIntoView(), 50);
   }
 
   // ── 장부 관리 ──
@@ -98,17 +128,26 @@ Pages.settings = (() => {
   }
 
   // ── 백업 · 복원 ──
+  const backupName = () => `우리집가계부-백업-${U.today()}.sqlite3`;
+  /** 백업 파일 저장: 시스템 저장 창에서 위치를 마음대로 (내 파일의 아무 폴더 · Google Drive 등) */
   function exportDb() {
-    const name = `gagyebu-${U.today().replace(/-/g, '')}.sqlite3`;
-    App.nativeAsync('exportDb', name).then(r => {
-      if (r.ok) UI.alert(`자료 파일을 저장했습니다 (${Math.round(r.size / 1024)}KB).\n\nPC로 옮긴 뒤 PC판 설정 → 암호 · 백업 → '백업 파일로 복원하기…'로 열면 됩니다.`);
+    App.nativeAsync('exportDb', backupName()).then(r => {
+      if (r.ok) UI.alert(`백업 파일을 저장했습니다 (${Math.round(r.size / 1024)}KB).\n\n불러올 때는 설정 → 백업 불러오기에서 이 파일을 고르세요. PC판에서는 설정 → 암호 · 백업 → '백업 파일로 복원하기…'로 엽니다.`);
       else if (!r.cancel) UI.alert('저장하지 못했습니다.\n' + r.error);
     });
   }
-  function importDb() {
+  /** 백업 파일 보내기: 공유 창 (카카오톡·디스코드·메일·드라이브 등) */
+  function shareDb() {
+    if (!App.native.shareDb) { UI.alert('이 앱 판에서는 보내기를 쓸 수 없습니다. 앱을 새 버전으로 업데이트하세요.'); return; }
+    App.nativeAsync('shareDb', backupName()).then(r => {
+      if (!r.ok) UI.alert('보내기 창을 열지 못했습니다.\n' + r.error);
+    });
+  }
+  /** 백업 불러오기: via=false 시스템 파일 창(내 파일·Google Drive) / via=true 앱을 먼저 고름(삼성 내 파일 등) */
+  function importDb(via) {
     UI.confirm('지금 휴대폰의 자료를 고른 백업 파일 내용으로 바꿉니다.\n지금 자료는 앱 안에 보관해 두니 \'앱 안 보관본\'에서 되돌릴 수 있습니다.\n\n계속할까요?', '파일 고르기').then(ok => {
       if (!ok) return;
-      App.nativeAsync('importDb').then(r => {
+      App.nativeAsync(via && App.native.importDbVia ? 'importDbVia' : 'importDb').then(r => {
         if (r.ok) { App.afterReplace(); UI.alert('자료를 가져왔습니다.' + (r.kept ? `\n이전 자료 보관: ${r.kept}` : '')); }
         else if (!r.cancel) UI.alert('가져오지 못했습니다.\n' + r.error + '\n\n지금 자료는 그대로입니다.');
       });
@@ -192,24 +231,21 @@ Pages.settings = (() => {
 
   // ── 화면 꾸미기 (이 휴대폰에만 저장) ──
   function decoHtml() {
-    return `<div class="form">
-      <div class="f"><label class="l">테마</label><select data-p="theme"><option value="retro">미니홈피 (2000년대 감성)</option><option value="basic">기본 (깔끔하게)</option><option value="feed">피드 · 미니홈피 색 (사진 SNS 느낌)</option><option value="feed_light">피드 · 밝게</option><option value="feed_dark">피드 · 어둡게</option><option value="timeline">타임라인 · 미니홈피 색 (짧은 글 SNS 느낌)</option><option value="timeline_light">타임라인 · 밝게</option><option value="timeline_dark">타임라인 · 어둡게</option></select><div class="hint">피드·타임라인 테마는 휴대폰 기본 글꼴을 쓰고, 가계부 목록이 피드·타임라인 모양으로 바뀝니다. 기능은 같습니다. 색은 미니홈피 색·밝게·어둡게 중에서 고릅니다.</div></div>
-      <div class="f"><label class="l">글꼴</label><select data-p="font"><option value="pixel">도트 글꼴 (갈무리)</option><option value="system">휴대폰 기본 글꼴</option></select></div>
-      <div class="f"><label class="l">글자 크기 <b class="fs-v"></b></label>
+    return `${grp('테마', `<select class="inp" data-p="theme">${Object.entries(THEME_NAMES).map(([k, v]) => `<option value="${k}">${v}${k === 'retro' ? ' (2000년대 감성)' : k === 'basic' ? ' (깔끔하게)' : k === 'feed' ? ' (사진 SNS 모양)' : k === 'timeline' ? ' (짧은 글 SNS 모양)' : ''}</option>`).join('')}</select>`,
+      '피드·타임라인은 화면이 SNS 앱처럼 바뀌고 휴대폰 기본 글꼴을 씁니다. 기능은 같습니다. 색은 미니홈피 색·밝게·어둡게 중에서 고릅니다.', true)}
+      ${grp('글자', `<div class="form"><div class="f"><label class="l">글꼴</label><select data-p="font"><option value="pixel">도트 글꼴 (갈무리)</option><option value="system">휴대폰 기본 글꼴</option>${Object.entries(App.FONTS).map(([k, f]) => `<option value="${k}">${f[0]}</option>`).join('')}</select></div>
+        <div class="f" style="margin-bottom:0"><label class="l">글자 크기 <b class="fs-v"></b></label>
         <div class="fsz"><button class="btn sm" data-fs="-1" aria-label="1픽셀 작게">－</button><input type="range" min="${App.FS_MIN}" max="${App.FS_MAX}" step="1" data-fsr aria-label="글자 크기">
-        <button class="btn sm" data-fs="1" aria-label="1픽셀 크게">＋</button><button class="btn sm" data-fs="0">기본</button></div>
-        <div class="hint">1픽셀씩 조절합니다 (${App.FS_MIN}~${App.FS_MAX}px). 바꾸면 바로 보입니다.</div></div>
-      <div class="f"><label class="l">순서</label><div class="row wrap"><button class="btn sm" data-ord="nav">메뉴 순서</button><button class="btn sm" data-ord="layout">가계부 화면 구성</button></div>
-        <div class="hint">메뉴: 위 4개가 아래 탭, 나머지는 더보기 화면 · 계정과목 순서는 장부·계정 → 계정과목에서</div></div>
-      <div class="f"><label class="l">이 테마의 색</label><div class="colors"></div>
-        <div class="row" style="margin-top:6px"><button class="btn sm" data-creset>이 테마 색 모두 처음으로</button></div>
-        <div class="hint">고른 색은 이 휴대폰의 지금 테마에만 쓰입니다. 나머지 색(테두리·흐린 글자 등)은 고른 색에 맞춰 자동으로 바뀝니다.</div></div>
-      <label class="check"><input type="checkbox" data-p="marquee"> 전광판 (맨 위 흐르는 글자)</label>
-      <div class="f"><label class="l">오늘의 기분</label><select data-p="mood">${App.MOODS.map(m => `<option>${U.esc(m)}</option>`).join('')}</select></div>
-      <div class="f"><label class="l">한마디 (전광판에 나옴)</label><input type="text" data-p="motto" placeholder="오늘도 알뜰살뜰 (^-^)v"></div>
-      <div class="f"><label class="l">미니미 (맨 위 그림)</label><div class="stickers">${STICKERS.map(s => `<button data-st="${s}"><img src="${UI.sticker(s)}" alt="" loading="lazy"></button>`).join('')}</div></div></div>`;
+        <button class="btn sm" data-fs="1" aria-label="1픽셀 크게">＋</button><button class="btn sm" data-fs="0">기본</button></div></div></div>`,
+        `도트 글꼴은 미니홈피·기본 테마에서, 고운돋움·주아·개구·서툰이야기(무료 글꼴)는 모든 테마에서 쓰입니다. 글자 크기는 1픽셀씩 (${App.FS_MIN}~${App.FS_MAX}px), 바꾸면 바로 보입니다.`, true)}
+      ${grp('순서', `<div class="row wrap"><button class="btn sm" data-ord="nav">메뉴 순서</button><button class="btn sm" data-ord="layout">가계부 화면 구성</button></div>`,
+        '메뉴: 위 4개가 아래 탭, 나머지는 더보기 화면. 계정과목 순서는 설정 → 계정과목에서.', true)}
+      ${grp('이 테마의 색', `<div class="colors"></div><div class="row" style="margin-top:8px"><button class="btn sm" data-creset>이 테마 색 모두 처음으로</button></div>`,
+        '고른 색은 이 휴대폰의 지금 테마에만 쓰입니다. 나머지 색(테두리·흐린 글자 등)은 고른 색에 맞춰 바뀝니다.', true)}
+      ${grp('맨 위 전광판', '<label class="check" style="margin:0"><input type="checkbox" data-p="marquee"> 흐르는 글자 보이기</label>', '미니홈피 테마에서만 보입니다.', true)}`;
   }
-  function bindDeco(c) {
+  /** data-p 칸 (테마·글꼴·전광판·기분·한마디): 바꾸면 바로 저장·적용 */
+  function bindPrefs(c, onTheme) {
     UI.$$('[data-p]', c).forEach(x => {
       const k = x.dataset.p;
       if (x.type === 'checkbox') x.checked = App.pref(k) === 'true'; else x.value = App.pref(k) || '';
@@ -217,9 +253,12 @@ Pages.settings = (() => {
         App.setPref(k, x.type === 'checkbox' ? String(x.checked) : x.value);
         App.applyTheme();
         App.updateHeader();
-        if (k === 'theme') drawColors(c);
+        if (k === 'theme' && onTheme) onTheme();
       });
     });
+  }
+  function bindDeco(c) {
+    bindPrefs(c, () => drawColors(c));
     // 글자 크기 (1px 단위)
     const fsr = UI.$('[data-fsr]', c), fsv = UI.$('.fs-v', c);
     const showFs = () => { fsr.value = App.fontPx(); fsv.textContent = App.fontPx() + 'px'; };
@@ -241,13 +280,6 @@ Pages.settings = (() => {
       UI.toast('처음 색으로 되돌렸습니다');
     };
     drawColors(c);
-    const cur = App.pref('minimi');
-    UI.$$('[data-st]', c).forEach(b => b.classList.toggle('on', b.dataset.st === cur));
-    UI.on(c, '[data-st]', 'click', (e, b) => {
-      App.setPref('minimi', b.dataset.st);
-      UI.$$('[data-st]', c).forEach(x => x.classList.toggle('on', x === b));
-      App.updateHeader();
-    });
   }
   /** 지금 테마의 색 6가지 견본 (누르면 색 고르기) */
   function drawColors(c) {
@@ -289,10 +321,11 @@ Pages.settings = (() => {
     try { info = JSON.parse(App.native.appInfo()); } catch (_) { /* 없음 */ }
     return `<div class="small" style="line-height:1.7">우리집 가계부 (안드로이드판) ${U.esc(info.version || '')}<br>
       자료 파일 크기: ${info.dbSize ? Math.round(info.dbSize / 1024) + 'KB' : '-'}<br>
-      <span class="muted">글꼴: 갈무리(Galmuri) — SIL Open Font License 1.1 · 음력 계산: korean-lunar-calendar — MIT License<br>
+      <span class="muted">글꼴 (모두 SIL Open Font License 1.1): 갈무리(Galmuri) · 고운돋움 · 주아 · 개구 · 서툰이야기 · 나눔손글씨 펜(피드 로고)<br>
+      음력 계산: korean-lunar-calendar — MIT License<br>
       아늑단 이미지: 사용자가 제공한 스티커 시트에서 오려 낸 그림 (개인 사용)</span></div>`;
   }
-  return { title: '설정', sticker: 'b08', sub: '내 맘대로 꾸미기', render, tab: 'more', newLedger, ledgerSheet };
+  return { title: p => SECTIONS[p && p.section] || '설정', sticker: 'b08', sub: '내 맘대로 꾸미기', render, tab: 'more', newLedger, ledgerSheet };
 })();
 
 // ════════ 계정과목 편집 ════════

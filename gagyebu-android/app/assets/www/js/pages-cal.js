@@ -10,6 +10,7 @@ Pages.calendar = (() => {
 
   function render(c, p, tools) {
     const lid = App.lid;
+    if (p && p.date) { [s.y, s.m] = U.parts(p.date); s.sel = p.date; p.date = null; }    // 가계부 게시물의 [달력에서 보기]
     const ab = UI.el('<button class="btn sm">기념일</button>');
     ab.onclick = () => App.go('anniv', {}, true);
     tools.appendChild(ab);

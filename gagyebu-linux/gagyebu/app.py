@@ -4,10 +4,10 @@ import datetime as dt
 import os
 import sys
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel,
-                             QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QScrollArea,
+                             QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea,
                              QStackedWidget, QVBoxLayout, QWidget)
 
 from . import EDITION, __version__, db
@@ -17,9 +17,14 @@ from .services import calendar_svc as C
 from .services import ledger as L
 from .services import recurring as R
 from .ui import hompy as H
+from .ui import icons as IC
 from .util import check_password, fmt_money
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# 피드·타임라인 테마의 왼쪽 메뉴 아이콘 (안드로이드판 main.js NAV_ICON 과 같은 그림)
+NAV_ICON = {'LedgerPage': 'home', 'SearchPage': 'search', 'ReportsPage': 'report', 'GraphPage': 'chart', 'RecurringPage': 'repeat',
+            'AssetsPage': 'wallet', 'CalendarPage': 'calendar', 'AddressPage': 'user', 'DiaryPage': 'book', 'MemoPage': 'note',
+            'SettingsPage': 'gear'}
 
 
 class LoginDialog(QDialog):
@@ -143,6 +148,9 @@ class MainWindow(QMainWindow):
         self.mainbox = QFrame()
         self.mainbox.setObjectName('MainBox')
         self.main_lay = QVBoxLayout(self.mainbox)
+        self.sns_title = QLabel()                      # 피드·타임라인: 화면 이름 (짧은 글 SNS 의 가운데 칸 머리)
+        self.sns_title.setObjectName('SnsTitle')
+        self.main_lay.addWidget(self.sns_title)
         self.main_lay.addWidget(self.banner)
         self.main_lay.addWidget(self.stack, 1)
         self.hompy = QFrame()
@@ -150,10 +158,45 @@ class MainWindow(QMainWindow):
         self.hompy_lay = QHBoxLayout(self.hompy)
         self.hompy_lay.addWidget(self.profile)
         self.hompy_lay.addWidget(self.mainbox, 1)
+        # 피드·타임라인: 왼쪽 줄 = 로고 · 아이콘 메뉴 · 새 내역(쓰기) · 장부 고르기 · 내 프로필
+        self.rail_logo = QLabel('우리집 가계부')
+        self.rail_logo.setObjectName('RailLogo')
+        self.rail_create = QPushButton('새 내역')
+        self.rail_create.setObjectName('RailCreate')
+        self.rail_create.setToolTip('가계부 화면의 입력하기로')
+        self.rail_create.clicked.connect(self.compose)
+        self.rail_compose = QPushButton('입력하기')
+        self.rail_compose.setObjectName('RailCompose')
+        self.rail_compose.setToolTip('가계부 화면의 입력하기로')
+        self.rail_compose.clicked.connect(self.compose)
+        self.rail_ledger = QWidget()
+        self.rail_ledger_lay = QVBoxLayout(self.rail_ledger)
+        self.rail_ledger_lay.setContentsMargins(0, 0, 0, 0)
+        self.rail_chip = QWidget()
+        chip = QHBoxLayout(self.rail_chip)
+        chip.setContentsMargins(6, 6, 6, 6)
+        self.rail_avatar = QLabel()
+        self.rail_avatar.setFixedSize(40, 40)
+        self.rail_avatar.setToolTip('미니미 바꾸기: 설정 → 화면 꾸미기')
+        self.rail_name = QLabel()
+        self.rail_name.setObjectName('RailName')
+        self.rail_sub = QLabel()
+        self.rail_sub.setObjectName('RailSub')
+        names = QVBoxLayout()
+        names.setSpacing(0)
+        names.addWidget(self.rail_name)
+        names.addWidget(self.rail_sub)
+        chip.addWidget(self.rail_avatar)
+        chip.addLayout(names, 1)
         self.navwrap = QWidget()
+        self.navwrap.setObjectName('SnsRail')
+        self.navwrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.nav_lay = QVBoxLayout(self.navwrap)
-        self.nav_lay.addWidget(self.nav)
+        for w in (self.rail_logo, self.nav, self.rail_create, self.rail_compose):
+            self.nav_lay.addWidget(w)
         self.nav_lay.addStretch(1)
+        self.nav_lay.addWidget(self.rail_ledger)
+        self.nav_lay.addWidget(self.rail_chip)
         self.body = QHBoxLayout()
         self.body.setSpacing(0)
         self.body.addWidget(self.hompy, 1)
@@ -180,26 +223,23 @@ class MainWindow(QMainWindow):
         for w in (self.hompy_caption, self.profile, self.banner):
             w.setVisible(retro)
         for w in (self.today_lbl, self.hompy_title):
-            w.setVisible(retro or sns)
-        self.sns_avatar.setVisible(sns)
-        if sns:
-            self.sns_avatar.setPixmap(TH.avatar_pixmap(TH.pref('minimi'), 40, theme))
+            w.setVisible(retro)
+        self.sns_avatar.hide()
         self.hompy_title.setText('☆ 우리집 가계부 ☆' if retro else '우리집 가계부')
-        # 미니홈피: [TODAY] 제목 / 피드·타임라인: (미니미) 제목 [TODAY]
-        self.top_lay.removeWidget(self.today_lbl)
-        i = self.top_lay.indexOf(self.hompy_title)
-        self.top_lay.insertWidget(i + 1 if sns else i, self.today_lbl)
         self.marquee.setVisible(retro)
         self.marquee.set_running(retro and TH.pref('marquee'))
         self.ledger_lbl.setText('장부:' if retro else ' 장부: ')
+        self.ledger_lbl.setVisible(not sns)
+        self._place_rail(theme)
         # 탭: 미니홈피는 틀 오른쪽에 붙은 탭, 기본은 왼쪽 목록
         self.body.removeWidget(self.navwrap)
         if retro:
             self.body.addWidget(self.navwrap)
             self.nav.setFixedWidth(self._nav_width(92, 26))
             self.nav_lay.setContentsMargins(0, 26, 0, 0)
-            self.nav_lay.setStretch(0, 0)
-            self.nav_lay.setStretch(1, 1)
+            self.nav_lay.setSpacing(6)
+            self.nav_lay.setStretch(1, 0)
+            self.nav_lay.setStretch(4, 1)
             self.outer.setContentsMargins(12, 8, 4, 10)
             self.outer.setSpacing(8)
             self.hompy_lay.setContentsMargins(8, 8, 8, 8)
@@ -208,23 +248,97 @@ class MainWindow(QMainWindow):
             self.main_lay.setSpacing(6)
         else:
             self.body.insertWidget(0, self.navwrap)
-            self.nav.setFixedWidth(self._nav_width(170 if sns else 150, 40))
+            self.nav.setFixedWidth(self._nav_width(206, 78) if sns else self._nav_width(150, 40))
             self.nav.setMinimumHeight(0)
             self.nav.setMaximumHeight(16777215)
-            self.nav_lay.setContentsMargins(0, 0, 9, 0)
-            self.nav_lay.setStretch(0, 1)
-            self.nav_lay.setStretch(1, 0)
-            self.outer.setContentsMargins(9, 6, 9, 9)
-            self.outer.setSpacing(6)
+            self.nav_lay.setStretch(1, 0 if sns else 1)
+            self.nav_lay.setStretch(4, 1 if sns else 0)
+            if sns:
+                mh = TH.variant_of(theme) == 'mh'
+                self.nav_lay.setContentsMargins(12, 18, 12, 14)
+                self.nav_lay.setSpacing(6)
+                self.outer.setContentsMargins(0, 8 if mh else 0, 0, 0)
+                self.outer.setSpacing(0)
+            else:
+                self.nav_lay.setContentsMargins(0, 0, 9, 0)
+                self.nav_lay.setSpacing(6)
+                self.outer.setContentsMargins(9, 6, 9, 9)
+                self.outer.setSpacing(6)
             for lay in (self.hompy_lay, self.main_lay):
                 lay.setContentsMargins(0, 0, 0, 0)
                 lay.setSpacing(0)
         self.profile.load_prefs()
-        if retro:
-            self._fit_nav()
+        if retro or sns:
+            self._fit_nav()                         # 메뉴 높이를 내용에 맞춤 (SNS: 바로 아래에 새 내역 단추)
         self.backdrop.update()
         if refresh:
             self.data_changed()
+
+    def _place_rail(self, theme):
+        """피드·타임라인: 왼쪽 줄(로고·아이콘 메뉴·쓰기·장부·내 프로필), 그 밖: 맨 위 줄에 장부 고르기"""
+        sns = theme in TH.SNS_THEMES
+        lay_ = TH.layout_of(theme)
+        c = TH.sns_colors(theme) or {}
+        for w in (self.rail_logo, self.rail_ledger, self.rail_chip):
+            w.setVisible(sns)
+        self.rail_create.setVisible(lay_ == 'feed')
+        self.rail_compose.setVisible(lay_ == 'timeline')
+        combo = self.ledger_combo
+        if sns:
+            self.top_lay.removeWidget(combo)
+            self.rail_ledger_lay.addWidget(combo)
+            combo.setObjectName('RailLedger')
+            combo.setMinimumWidth(0)
+            if lay_ == 'feed':                      # 손글씨 로고
+                f = QFont(TH.logo_family() or self.font().family())
+                f.setPixelSize(34)
+                self.rail_logo.setFont(f)
+                self.rail_logo.setText('우리집 가계부')
+            else:                                   # 고양이 로고
+                self.rail_logo.setText('')
+                self.rail_logo.setPixmap(TH.sticker_pixmap('a01', 46))
+            on = c.get('on_bg', '#000000')
+            self.rail_create.setIcon(QIcon(IC.pixmap('plus', 26, on)))
+            self.rail_create.setIconSize(QSize(26, 26))
+            self.rail_compose.setIcon(QIcon(IC.pixmap('pen', 20, '#FFFFFF', width=2.2)))
+            self.rail_compose.setIconSize(QSize(20, 20))
+            self.rail_avatar.setPixmap(TH.avatar_pixmap(TH.pref('minimi'), 40, theme))
+            self.nav.setIconSize(QSize(26, 26))
+        else:
+            self.rail_ledger_lay.removeWidget(combo)
+            self.top_lay.addWidget(combo)
+            combo.setObjectName('')
+            combo.setMinimumWidth(200)
+        combo.style().unpolish(combo)
+        combo.style().polish(combo)
+        self._nav_icons(theme)
+
+    def _nav_icons(self, theme=None):
+        theme = theme or TH.current()[0]
+        c = TH.sns_colors(theme)
+        cur = self.nav.currentRow()
+        for row in range(self.nav.count()):
+            it = self.nav.item(row)
+            name = type(self.pages[self.nav_order[row]]).__name__
+            if c:
+                on = row == cur
+                ic = QIcon()
+                pm = IC.pixmap(NAV_ICON.get(name, 'dots'), 26, c['on_bg'], on=on)
+                for mode in (QIcon.Mode.Normal, QIcon.Mode.Selected, QIcon.Mode.Active):
+                    ic.addPixmap(pm, mode)                   # 고른 줄도 같은 색 (Qt 가 포인트색으로 물들이지 않게)
+                it.setIcon(ic)
+                f = QFont(self.nav.font())
+                f.setBold(on)
+                it.setFont(f)
+            else:
+                it.setIcon(QIcon())
+                it.setFont(self.nav.font())
+
+    def compose(self):
+        """왼쪽 줄의 [새 내역]/[입력하기]: 가계부 화면의 입력하기로"""
+        lp = self.goto('LedgerPage')
+        if lp is not None:
+            lp.new()
 
     def _nav_width(self, base, pad):
         """메뉴 폭: 기본 폭, 글자를 크게 하면 가장 긴 메뉴 이름이 다 보이게 넓힘"""
@@ -246,6 +360,7 @@ class MainWindow(QMainWindow):
         self.nav.blockSignals(False)
         if select and cur is not None:
             self.nav.setCurrentRow(order.index(cur))
+        self._nav_icons()
 
     def _fit_nav(self):
         """탭 목록 높이를 내용에 맞춤 (틀 옆에 탭만 붙어 보이게)."""
@@ -268,6 +383,11 @@ class MainWindow(QMainWindow):
         motto = TH.pref('motto').replace('\n', ' ') or '오늘도 알뜰살뜰 (^-^)v'
         self.marquee.set_text(f'♬ {today:%Y년 %m월 %d일} ☆ {name} 잔액 {bal}원 ☆ 이번 달 수입 {fmt_money(inc)}원 · '
                               f'지출 {fmt_money(exp)}원 ☆ {motto} ☆')
+        self.rail_name.setText(name)
+        self.rail_sub.setText(f'오늘 지출 {fmt_money(texp)}원 · 잔액 {bal}원')
+        self.rail_sub.setToolTip(f'이번 달 지출 {fmt_money(exp)}원')
+        if TH.current()[0] in TH.SNS_THEMES:
+            self.rail_avatar.setPixmap(TH.avatar_pixmap(TH.pref('minimi'), 40))
         return bal
 
     # ── 장부 ──
@@ -348,6 +468,13 @@ class MainWindow(QMainWindow):
         i = self.nav_order[row]
         self.stack.setCurrentIndex(i)
         self.banner.set_page(self.pages[i])
+        theme = TH.current()[0]
+        lay_ = TH.layout_of(theme)
+        # 피드의 가계부 화면은 프로필 머리가 제목 대신, 그 밖의 SNS 화면은 위에 화면 이름
+        self.sns_title.setVisible(bool(lay_) and not (lay_ == 'feed' and type(self.pages[i]).__name__ == 'LedgerPage'))
+        self.sns_title.setText(self.pages[i].title)
+        if lay_:
+            self._nav_icons(theme)
         if i in self.dirty:
             self.dirty.discard(i)
             self.pages[i].refresh()

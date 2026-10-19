@@ -231,6 +231,14 @@ class CalendarPage(QWidget):
                 self.grid.item(w, c).setData(Qt.ItemDataRole.UserRole, d.isoformat())
         self.show_day()
 
+    def show_date(self, d):
+        """그 날을 골라 보여 줌 (가계부 게시물의 [달력에서 보기])"""
+        self.sel = d
+        if (d.year, d.month) != (self.nav.y, self.nav.m):
+            self.nav.set(d.year, d.month)
+        else:
+            self.refresh()
+
     def _clicked(self, r, c):
         self.sel = dt.date.fromisoformat(self.grid.item(r, c).data(Qt.ItemDataRole.UserRole))
         if self.sel.month != self.nav.m:

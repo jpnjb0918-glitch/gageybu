@@ -46,6 +46,7 @@ python3 order_colors.py       # 순서 바꾸기(끌기·▲▼)·테마 색 바
 python3 graph_month.py        # 그래프 종류 8가지·연월 바로 고르기 (shots/graph/)
 python3 update_flow.py        # 새 버전 알림·내려받기·설치 흐름 (가짜 릴리스 목록, shots/update/)
 python3 ledger_font.py        # 기본 장부·목록에서 새 장부·글자 크기 1px (shots/ledger/)
+python3 sns_ui.py             # 피드·타임라인 아이콘·탭·동그라미, 무료 한글 글꼴 (shots/sns/)
 python3 compat/run.py         # PC판 파이썬 코드와 계산 결과 비교 (../gagyebu-linux 필요)
 ```
 

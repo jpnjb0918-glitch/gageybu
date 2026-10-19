@@ -208,8 +208,11 @@ const UI = (() => {
   }
 
   /** ◀ 2026년 10월 ▾ ▶ — 가운데 글자를 누르면 연·월을 바로 고르는 창 */
+  /** 달 이동 단추 글자: 피드·타임라인은 선 아이콘, 그 밖은 ◀ ▶ */
+  const arrows = () => (document.body.classList.contains('sns') ? [icon('chevl'), icon('chevr')] : ['◀', '▶']);
   function monthNav(y, m, onChange, labelFn) {
-    const nav = el(`<div class="monthnav"><button data-d="-1" aria-label="앞 달">◀</button><div class="lbl" role="button" aria-label="연·월 고르기"></div><button data-d="1" aria-label="다음 달">▶</button></div>`);
+    const [pv, nx] = arrows();
+    const nav = el(`<div class="monthnav"><button data-d="-1" aria-label="앞 달">${pv}</button><div class="lbl" role="button" aria-label="연·월 고르기"></div><button data-d="1" aria-label="다음 달">${nx}</button></div>`);
     const lbl = $('.lbl', nav);
     const show = () => { lbl.innerHTML = `${U.esc(labelFn ? labelFn(y, m) : U.monthLabel(y, m))}<span class="dd">▾</span>`; };
     show();
@@ -219,7 +222,8 @@ const UI = (() => {
   }
   /** ◀ 2026년 ▾ ▶ */
   function yearNav(y, onChange) {
-    const nav = el(`<div class="monthnav"><button data-d="-1" aria-label="앞 해">◀</button><div class="lbl" role="button" aria-label="연도 고르기"></div><button data-d="1" aria-label="다음 해">▶</button></div>`);
+    const [pv, nx] = arrows();
+    const nav = el(`<div class="monthnav"><button data-d="-1" aria-label="앞 해">${pv}</button><div class="lbl" role="button" aria-label="연도 고르기"></div><button data-d="1" aria-label="다음 해">${nx}</button></div>`);
     const lbl = $('.lbl', nav);
     const show = () => { lbl.innerHTML = `${y}년<span class="dd">▾</span>`; };
     show();
@@ -272,6 +276,57 @@ const UI = (() => {
     return s;
   }
   const empty = (msg, st) => `<div class="empty"><img src="${sticker(st || 'b39')}" alt="">${U.esc(msg)}</div>`;
+
+  // ── 선 아이콘 (피드·타임라인 테마). class="f" 인 부분은 '켜짐'일 때 채움 ──
+  const ICONS = {
+    home: '<path class="f" d="M3.5 10.2 12 3.3l8.5 6.9V19.6a1.4 1.4 0 0 1-1.4 1.4H15v-6.2H9V21H4.9a1.4 1.4 0 0 1-1.4-1.4z"/>',
+    search: '<circle cx="10.8" cy="10.8" r="7"/><path d="m20.5 20.5-4.7-4.7"/>',
+    plus: '<rect x="3" y="3" width="18" height="18" rx="5.5"/><path d="M12 7.8v8.4M7.8 12h8.4"/>',
+    add: '<path d="M12 4.5v15M4.5 12h15"/>',
+    heart: '<path class="f" d="M12 20.2s-7.6-4.6-9.3-9.3C1.5 7.6 3.7 4.4 7 4.4c2 0 3.4 1.1 5 3 1.6-1.9 3-3 5-3 3.3 0 5.5 3.2 4.3 6.5-1.7 4.7-9.3 9.3-9.3 9.3z"/>',
+    comment: '<path class="f" d="M20.6 11.6a8.6 8.6 0 0 1-12.4 7.7L3.4 20.6l1.4-4.6a8.6 8.6 0 1 1 15.8-4.4z"/>',
+    send: '<path d="M21.3 2.7 10.2 13.8"/><path class="f" d="M21.3 2.7 14.2 21l-4-7.2-7.3-4z"/>',
+    bookmark: '<path class="f" d="M6 3.2h12v17.6l-6-4.9-6 4.9z"/>',
+    calendar: '<rect x="3.2" y="4.6" width="17.6" height="16.4" rx="3"/><path d="M3.2 9.6h17.6M8 2.6v4M16 2.6v4"/>',
+    report: '<rect x="4.8" y="4" width="14.4" height="17" rx="2.6"/><path d="M9 4V2.8h6V4M8.6 10h6.8M8.6 13.8h6.8M8.6 17.6h4"/>',
+    wallet: '<path d="M4.5 7.4H19a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.4A2.4 2.4 0 0 1 5.4 4H16.6v3.4"/><circle cx="16.4" cy="14.2" r="1.3"/>',
+    chart: '<path d="M3.5 20.5h17M7 17V11.5M12 17V6.5M17 17v-3.6"/>',
+    repeat: '<path d="M4.5 8 7.5 5l3 3M7.5 5.6V15a3 3 0 0 0 3 3h3M19.5 16l-3 3-3-3M16.5 18.4V9a3 3 0 0 0-3-3h-3"/>',
+    gift: '<rect x="3.4" y="8" width="17.2" height="4.4" rx="1"/><path d="M5 12.4V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7.6M12 8v13M12 8S10.6 3.6 8.2 4.1 6.4 8 12 8zm0 0s1.4-4.4 3.8-3.9S17.6 8 12 8z"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
+    book: '<path d="M4 4.6A1.6 1.6 0 0 1 5.6 3H20v15H5.6A1.6 1.6 0 0 0 4 19.6zM4 19.6A1.6 1.6 0 0 0 5.6 21H20v-3"/>',
+    note: '<path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4M8.5 12h7M8.5 16h5"/>',
+    gear: '<path d="M19.25 10.53 L21.52 10.76 L21.52 13.24 L19.25 13.47 L18.17 16.09 L19.61 17.85 L17.85 19.61 L16.09 18.17 L13.47 19.25 L13.24 21.52 L10.76 21.52 L10.53 19.25 L7.91 18.17 L6.15 19.61 L4.39 17.85 L5.83 16.09 L4.75 13.47 L2.48 13.24 L2.48 10.76 L4.75 10.53 L5.83 7.91 L4.39 6.15 L6.15 4.39 L7.91 5.83 L10.53 4.75 L10.76 2.48 L13.24 2.48 L13.47 4.75 L16.09 5.83 L17.85 4.39 L19.61 6.15 L18.17 7.91Z"/><circle cx="12" cy="12" r="3"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.4 9.3a2.7 2.7 0 0 1 5.2.9c0 1.8-2.6 2.3-2.6 3.9M12 17.3v.1"/>',
+    dots: '<circle class="dot" cx="5" cy="12" r="1.5"/><circle class="dot" cx="12" cy="12" r="1.5"/><circle class="dot" cx="19" cy="12" r="1.5"/>',
+    more: '<circle cx="12" cy="12" r="9"/><circle class="dot" cx="7.8" cy="12" r="1.2"/><circle class="dot" cx="12" cy="12" r="1.2"/><circle class="dot" cx="16.2" cy="12" r="1.2"/>',
+    back: '<path d="M15 4.5 7.5 12l7.5 7.5"/>',
+    arrowleft: '<path d="M20 12H4.5M10.5 5.5 4 12l6.5 6.5"/>',
+    chevl: '<path d="M14.5 6 8.5 12l6 6"/>',
+    chevr: '<path d="M9.5 6l6 6-6 6"/>',
+    chevd: '<path d="m6 9.5 6 6 6-6"/>',
+    sort: '<path d="M8 4v16M4.5 7.5 8 4l3.5 3.5M16 20V4M12.5 16.5 16 20l3.5-3.5"/>',
+    download: '<path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4 17.5V20h16v-2.5"/>',
+    sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+    bell: '<path class="f" d="M6 16.4V11a6 6 0 1 1 12 0v5.4l1.6 2.1H4.4z"/><path d="M10 21h4"/>',
+    pin: '<path d="M14.6 3.4 20.6 9.4l-2.5.9-3.7 3.7.4 4.4-2 2-3.6-3.6L4 21l3.2-5.2-3.6-3.6 2-2 4.4.4 3.7-3.7z"/>',
+    stats: '<path d="M5 20.5V13M10 20.5V7M15 20.5v-9M20 20.5V4"/>',
+    pen: '<path d="M4 20l1.1-4.2L16.3 4.6a2 2 0 0 1 2.8 0l.3.3a2 2 0 0 1 0 2.8L8.2 18.9z"/><path d="M14.5 6.4l3.1 3.1"/>',
+    grid: '<rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/>',
+    all: '<path d="M7 9c-2.2 0-3.6 1.4-3.6 3S4.8 15 7 15c3.5 0 6.5-6 10-6 2.2 0 3.6 1.4 3.6 3S19.2 15 17 15c-3.5 0-6.5-6-10-6z"/>',
+    upload: '<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M4 17.5V20h16v-2.5"/>',
+    archive: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V9M10 13h4"/>',
+    lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+    refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.6v.1"/>',
+    tag: '<path d="M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.3 8.3a1.5 1.5 0 0 1 0 2.1l-6.2 6.2a1.5 1.5 0 0 1-2.1 0z"/><circle class="dot" cx="8" cy="8" r="1.4"/>',
+    print: '<path d="M7 8V3.5h10V8"/><rect x="3.5" y="8" width="17" height="9" rx="2.2"/><path d="M7 13.5h10v7H7z"/>',
+    palette: '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.1-.9-1.6-.9-2.6 0-1 .8-1.7 1.8-1.7h2.1A4.2 4.2 0 0 0 21 10.8C21 6.5 17 3 12 3z"/><circle class="dot" cx="7.5" cy="11.5" r="1.3"/><circle class="dot" cx="10" cy="7.5" r="1.3"/><circle class="dot" cx="14.5" cy="7.5" r="1.3"/>',
+    table: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10"/>',
+    list: '<path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12"/><circle class="dot" cx="4.5" cy="6.5" r="1.2"/><circle class="dot" cx="4.5" cy="12" r="1.2"/><circle class="dot" cx="4.5" cy="17.5" r="1.2"/>',
+  };
+  /** 아이콘 SVG 문자열 (name: ICONS 의 이름) */
+  const icon = (name, cls) => `<svg class="ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.dots}</svg>`;
 
   // ── 순서 바꾸기 창: ☰ 를 끌거나 ▲▼ 로 옮기고 저장 ──
   /** opts: {title, hint, items:[{key, label, sub}], subFor(i, key) (옮길 때마다 둘째 줄 다시 쓰기), onSave(keys), onReset(), resetLabel} */
@@ -393,6 +448,6 @@ const UI = (() => {
   }
 
   return { $, $$, el, on, sticker, money, moneyCls, toast, sheet, closeTop, isOpen, alert: alertBox, confirm,
-    formHtml, form, readForm, formSheet, bindMoney, codeOptions, monthNav, yearNav, monthPicker, seg, dialog, empty, reorder, colorPicker,
+    formHtml, form, readForm, formSheet, bindMoney, codeOptions, monthNav, yearNav, monthPicker, seg, dialog, empty, reorder, colorPicker, icon, ICONS,
     normHex, hexToHsl, hslToHex };
 })();

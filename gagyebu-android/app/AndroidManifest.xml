@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="kr.gagyebu.mobile"
-    android:versionCode="5"
-    android:versionName="1.4.0">
+    android:versionCode="6"
+    android:versionName="1.5.0">
 
     <!-- 최소 안드로이드 7.0(API 24). 안드로이드 15·16은 API 24 미만 대상 앱 설치를 막으므로 대상은 34 -->
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
     <!-- 인터넷: 새 버전 확인(GitHub 공개 릴리스 목록 읽기)과 새 APK 받기에만 씀. 가계부 자료는 보내지 않음
          설치 요청: 받은 새 APK 의 설치 화면 열기 (설치는 안드로이드가 따로 물어봄)
-         저장소 권한 없음: 자료는 앱 안에만 있고, 파일 주고받기는 시스템 파일 선택 창으로만 함 -->
+         저장소 권한 없음: 자료는 앱 안에만 있고, 파일 주고받기는 시스템 파일 선택 창·공유 창으로만 함 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
@@ -28,5 +28,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- 백업 파일 보내기(카카오톡·디스코드 등): 앱 캐시 share/ 의 사본만 고른 앱에 잠깐 읽기 권한으로 -->
+        <provider
+            android:name=".ShareProvider"
+            android:authorities="kr.gagyebu.mobile.share"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

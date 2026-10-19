@@ -21,6 +21,57 @@ def backup(con, folder):
     return path
 
 
+def backup_to_file(con, path):
+    """현재 DB를 고른 파일 하나로 안전하게 저장 (구글 드라이브 폴더·USB 등 아무 곳이나)"""
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, f'.{os.path.basename(path)}.tmp')
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    dst = sqlite3.connect(tmp)
+    try:
+        with dst:
+            con.commit()
+            con.backup(dst)
+        dst.execute('PRAGMA journal_mode=DELETE')
+    finally:
+        dst.close()
+    os.replace(tmp, path)                      # 다 쓴 뒤 한 번에 바꿈 (반쯤 쓴 파일이 남지 않게)
+    return path
+
+
+def backup_name(today=None):
+    """백업 파일 기본 이름 (휴대폰판과 같은 이름: 우리집가계부-백업-YYYY-MM-DD.sqlite3)"""
+    return f'우리집가계부-백업-{(today or dt.date.today()):%Y-%m-%d}.sqlite3'
+
+
+def google_drive_dirs():
+    """이 PC에서 찾은 구글 드라이브 폴더들 (Google Drive 데스크톱 앱·리눅스 온라인 계정·rclone 등이 만든 폴더)"""
+    home = os.path.expanduser('~')
+    cand = []
+    if os.name == 'nt':
+        import string
+        for d in string.ascii_uppercase[3:]:                       # D: ~ Z: (보통 G:)
+            for sub in ('내 드라이브', 'My Drive'):
+                cand.append(f'{d}:\\{sub}')
+        for sub in ('내 드라이브', 'My Drive', 'Google Drive', 'Google 드라이브'):
+            cand.append(os.path.join(home, sub))
+    else:
+        import glob
+        cand += sorted(glob.glob(os.path.join(home, 'Library', 'CloudStorage', 'GoogleDrive-*', '*')))   # macOS
+        cand += sorted(glob.glob(f'/run/user/{os.getuid()}/gvfs/google-drive:*'))                         # 그놈 온라인 계정
+        for sub in ('Google Drive', 'GoogleDrive', 'google-drive', 'gdrive', '구글드라이브', '구글 드라이브', '내 드라이브', 'My Drive'):
+            cand.append(os.path.join(home, sub))
+    out = []
+    for p in cand:
+        try:
+            if os.path.isdir(p) and p not in out:
+                out.append(p)
+        except OSError:
+            pass
+    return out
+
+
 def validate_db(path):
     try:
         c = sqlite3.connect(f'file:{path}?mode=ro', uri=True)

@@ -2,8 +2,8 @@
 import datetime as dt
 import html
 
-from PyQt6.QtCore import QDate, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QTextDocument
+from PyQt6.QtCore import QDate, QEvent, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QTextDocument
 from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox,
                              QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
                              QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTreeWidget,
@@ -469,8 +469,10 @@ class MonthNav(QWidget):
         self.lbl.setAlignment(CENTER)
         self.lbl.setToolTip('눌러서 연·월을 바로 고르기')
         self.lbl.clicked.connect(self.pick)
+        self.setObjectName('MonthNav')
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        self.arrows = []
         for txt, d in (('◀', -1), (None, 0), ('▶', 1)):
             if txt is None:
                 lay.addWidget(self.lbl)
@@ -480,8 +482,28 @@ class MonthNav(QWidget):
                 b.setToolTip('앞 달' if d < 0 else '다음 달')
                 b.clicked.connect(lambda _=False, d=d: self.shift(d))
                 lay.addWidget(b)
+                self.arrows.append(b)
         lay.addWidget(button('이번 달', self.this_month))
         self._upd()
+        self._style_arrows()
+
+    def _style_arrows(self):
+        """피드·타임라인 테마는 ◀▶ 대신 선 아이콘"""
+        from .. import theme as _T
+        from . import icons as _I
+        c = _T.sns_colors()
+        for b, (txt, name) in zip(self.arrows, (('◀', 'chevl'), ('▶', 'chevr'))):
+            if c:
+                b.setText('')
+                b.setIcon(QIcon(_I.pixmap(name, 18, c['ink'], width=2.4)))
+            else:
+                b.setIcon(QIcon())
+                b.setText(txt)
+
+    def changeEvent(self, ev):
+        if ev.type() == QEvent.Type.StyleChange:
+            self._style_arrows()
+        super().changeEvent(ev)
 
     def shift(self, d):
         k = self.y * 12 + self.m - 1 + d

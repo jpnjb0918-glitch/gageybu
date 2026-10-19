@@ -590,6 +590,73 @@ public class NativeBridge {
         });
     }
 
+    /** 백업 파일 보내기: 지금 자료의 사본을 만들어 공유 창(카카오톡·디스코드·메일·드라이브 등)에 내어 줌 */
+    @JavascriptInterface
+    public void shareDb(final String fileName, final String cb) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String name = fileName == null ? "" : fileName.replaceAll("[\\\\/:*?\"<>|]", "_");
+                    if (name.isEmpty() || name.contains("..")) {
+                        name = "gagyebu.sqlite3";
+                    }
+                    File dir = ShareProvider.dir(act);
+                    if (!dir.isDirectory() && !dir.mkdirs()) {
+                        throw new IllegalStateException("보낼 파일을 만들 수 없습니다.");
+                    }
+                    File[] old = dir.listFiles();
+                    if (old != null) {
+                        for (File f : old) {            // 지난번에 보낸 사본은 지움 (캐시에 쌓이지 않게)
+                            f.delete();
+                        }
+                    }
+                    final File out = new File(dir, name);
+                    snapshotTo(out);
+                    final Uri uri = ShareProvider.uriFor(name);
+                    final long size = out.length();
+                    act.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                Intent it = new Intent(Intent.ACTION_SEND);
+                                it.setType("application/octet-stream");
+                                it.putExtra(Intent.EXTRA_STREAM, uri);
+                                it.putExtra(Intent.EXTRA_SUBJECT, "우리집 가계부 백업");
+                                it.setClipData(android.content.ClipData.newRawUri("우리집 가계부 백업", uri));
+                                it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                Intent ch = Intent.createChooser(it, "백업 파일 보내기");
+                                ch.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                act.startActivity(ch);
+                                JSONObject o = ok();
+                                o.put("size", size);
+                                callback(cb, o);
+                            } catch (Exception e) {
+                                callback(cb, errObj("보내기 창을 열 수 없습니다: " + e.getMessage()));
+                            }
+                        }
+                    });
+                } catch (Throwable e) {
+                    callback(cb, errObj(e.getMessage() == null ? e.toString() : e.getMessage()));
+                }
+            }
+        }).start();
+    }
+
+    /** 다른 앱으로 백업 파일 고르기 (삼성 '내 파일'·Files·드라이브 등 앱을 먼저 고르고 그 안에서 경로 선택) */
+    @JavascriptInterface
+    public void importDbVia(final String cb) {
+        startPicker(cb, null, new Runnable() {
+            @Override
+            public void run() {
+                Intent it = new Intent(Intent.ACTION_GET_CONTENT);
+                it.addCategory(Intent.CATEGORY_OPENABLE);
+                it.setType("*/*");
+                act.startActivityForResult(Intent.createChooser(it, "백업 파일이 있는 앱 고르기"), REQ_IMPORT_DB);
+            }
+        });
+    }
+
     @JavascriptInterface
     public void importDb(final String cb) {
         startPicker(cb, null, new Runnable() {
@@ -731,21 +798,26 @@ public class NativeBridge {
         }
     }
 
+    /** 지금 자료 파일의 온전한 사본 (잠금 안에서는 닫기 → 복사 → 다시 열기만, 짧게) */
+    private void snapshotTo(File snap) throws Exception {
+        synchronized (this) {
+            needDb();
+            if (txDepth > 0) {
+                throw new IllegalStateException("저장 중인 작업이 끝난 뒤 다시 시도하세요.");
+            }
+            closeDb();
+            try {
+                copyFile(dbFile, snap);
+            } finally {
+                openDb();
+            }
+        }
+    }
+
     private JSONObject doExport(Uri uri) throws Exception {
         File snap = File.createTempFile("export", ".sqlite3", act.getCacheDir());
         try {
-            synchronized (this) {           // 잠금 안에서는 닫기 → 앱 안 사본 → 다시 열기만 (짧게)
-                needDb();
-                if (txDepth > 0) {
-                    throw new IllegalStateException("저장 중인 작업이 끝난 뒤 다시 시도하세요.");
-                }
-                closeDb();
-                try {
-                    copyFile(dbFile, snap);
-                } finally {
-                    openDb();
-                }
-            }
+            snapshotTo(snap);
             long size;
             try {
                 OutputStream out = openForWrite(uri);

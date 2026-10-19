@@ -41,9 +41,10 @@ sudo apt install default-jdk android-sdk-platform-23 aapt apksigner zipalign dal
 cd devtools && npm install sql.js korean-lunar-calendar     # 시험용 SQLite(웹어셈블리)
 python3 smoke.py              # 모든 화면이 오류 없이 그려지는지 + 화면 사진(shots/)
 python3 e2e.py                # 화면을 눌러 입력·수정·예약·카드·내보내기·가져오기·암호 확인
-python3 themes.py             # 테마 5개 × 화면 8개 사진·가로 넘침 확인
+python3 themes.py             # 테마 8개 × 화면 여러 개 사진·가로 넘침 확인
 python3 order_colors.py       # 순서 바꾸기(끌기·▲▼)·테마 색 바꾸기
 python3 graph_month.py        # 그래프 종류 8가지·연월 바로 고르기 (shots/graph/)
+python3 update_flow.py        # 새 버전 알림·내려받기·설치 흐름 (가짜 릴리스 목록, shots/update/)
 python3 compat/run.py         # PC판 파이썬 코드와 계산 결과 비교 (../gagyebu-linux 필요)
 ```
 

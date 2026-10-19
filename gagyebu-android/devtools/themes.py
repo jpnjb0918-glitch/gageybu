@@ -13,7 +13,7 @@ from playwright.sync_api import sync_playwright
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'devtools', 'shots', 'themes')
 os.makedirs(OUT, exist_ok=True)
-THEMES = ['retro', 'basic', 'feed', 'timeline', 'timeline_dark']
+THEMES = ['retro', 'basic', 'feed', 'feed_light', 'feed_dark', 'timeline', 'timeline_light', 'timeline_dark']
 WIDTHS = [360, 412]
 
 

@@ -41,8 +41,11 @@ const App = (() => {
   const BASE_COLORS = {
     retro: { accent: '#FF8FB1', bg: '#347C7C', card: '#FFFFFF', ink: '#1A1A1A', in: '#1F6FB2', out: '#D23F6E' },
     basic: { accent: '#347C7C', bg: '#EEF2F2', card: '#FFFFFF', ink: '#1A1A1A', in: '#1F6FB2', out: '#D23F6E' },
-    feed: { accent: '#E5487E', bg: '#FAFAFA', card: '#FFFFFF', ink: '#1F1F1F', in: '#2F6FDB', out: '#E0336A' },
-    timeline: { accent: '#1D8FE1', bg: '#FFFFFF', card: '#FFFFFF', ink: '#16191C', in: '#1D8FE1', out: '#E0336A' },
+    feed: { accent: '#E0507A', bg: '#347C7C', card: '#FFFFFF', ink: '#1A1A1A', in: '#1F6FB2', out: '#D23F6E' },
+    feed_light: { accent: '#E5487E', bg: '#FAFAFA', card: '#FFFFFF', ink: '#1F1F1F', in: '#2F6FDB', out: '#E0336A' },
+    feed_dark: { accent: '#F0568C', bg: '#000000', card: '#000000', ink: '#F2F2F2', in: '#5B9BF5', out: '#F45C84' },
+    timeline: { accent: '#347C7C', bg: '#347C7C', card: '#FFFFFF', ink: '#1A1A1A', in: '#1F6FB2', out: '#D23F6E' },
+    timeline_light: { accent: '#1D8FE1', bg: '#FFFFFF', card: '#FFFFFF', ink: '#16191C', in: '#1D8FE1', out: '#E0336A' },
     timeline_dark: { accent: '#2A9BEA', bg: '#000000', card: '#000000', ink: '#E6E8EA', in: '#52AEF2', out: '#F45C84' },
   };
   const baseColors = t => Object.assign({}, BASE_COLORS[t || theme()]);
@@ -65,7 +68,8 @@ const App = (() => {
   const mix = (a, b, t) => { const x = rgb(a), y = rgb(b); return hex(x.map((v, i) => v + (y[i] - v) * t)); };
   const lum = h => { const [r, g, b] = rgb(h).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
   const COLOR_VARS = ['--accent', '--accent-soft', '--bg', '--card', '--surface', '--surface-2', '--grid', '--sep', '--ink', '--muted', '--line',
-    '--in', '--out', '--mint', '--mint-pale', '--mint-row', '--teal', '--teal-dark', '--pink', '--pink-dark', '--pink-pale', '--dash', '--ring', '--on-bg'];
+    '--in', '--out', '--mint', '--mint-pale', '--mint-row', '--teal', '--teal-dark', '--pink', '--pink-dark', '--pink-pale', '--dash', '--ring', '--on-bg',
+    '--page', '--on-top', '--on-top-2'];
   /** 고른 색을 화면 변수에 넣음 (고친 색이 없으면 테마 원래 색 그대로) */
   function applyColors(t) {
     const bs = document.body.style;
@@ -94,23 +98,32 @@ const App = (() => {
     } else {
       set('--teal-dark', c.ink); set('--mint-pale', c.card); set('--mint', mix(c.card, c.ink, 0.07));
       set('--line', mix(c.card, c.ink, 0.14)); set('--pink-pale', mix(c.card, c.out, 0.12));
-      if (t === 'feed') set('--ring', `linear-gradient(45deg, ${mix(c.accent, '#FFC861', 0.55)}, ${c.accent} 55%, ${mix(c.accent, '#8B5CF6', 0.55)})`);
+      if (layoutOf(t) === 'feed') set('--ring', `linear-gradient(45deg, ${mix(c.accent, '#FFC861', 0.55)}, ${c.accent} 55%, ${mix(c.accent, '#8B5CF6', 0.55)})`);
+      if (variantOf(t) === 'mh') {          // 미니홈피 색: 맨 위는 바탕색 그대로, 그 위 글자는 바탕에 맞춰
+        const onTop = lum(c.bg) < 0.4 ? '#FFFFFF' : '#1A1A1A';
+        set('--on-top', onTop); set('--on-top-2', mix(onTop, c.bg, 0.3));
+        set('--page', layoutOf(t) === 'feed' ? mix(c.card, c.bg, 0.1) : c.card);
+      }
     }
     return c;
   }
 
-  // 테마: retro(미니홈피) · basic(기본) · feed(사진 SNS 느낌) · timeline / timeline_dark(짧은 글 SNS 느낌)
-  const THEMES = ['retro', 'basic', 'feed', 'timeline', 'timeline_dark'];
+  // 테마: retro(미니홈피) · basic(기본) · 피드(사진 SNS 느낌)·타임라인(짧은 글 SNS 느낌) × 미니홈피 색/밝게/어둡게
+  //   feed, timeline = 미니홈피 색 · feed_light, timeline_light = 흰 바탕 · feed_dark, timeline_dark = 검은 바탕 (PC판 theme.py 와 같은 이름)
+  const THEMES = ['retro', 'basic', 'feed', 'feed_light', 'feed_dark', 'timeline', 'timeline_light', 'timeline_dark'];
   const theme = () => (THEMES.includes(pref('theme')) ? pref('theme') : 'retro');
-  const isSns = () => ['feed', 'timeline', 'timeline_dark'].includes(theme());
+  const layoutOf = t => (/^feed/.test(t || '') ? 'feed' : /^timeline/.test(t || '') ? 'timeline' : null);
+  const variantOf = t => (!layoutOf(t) ? null : /_light$/.test(t) ? 'light' : /_dark$/.test(t) ? 'dark' : 'mh');
+  const isSns = () => !!layoutOf(theme());
   function applyTheme() {
     const t = theme(), sns = isSns();
     const cl = document.body.classList;
     cl.toggle('basic', t === 'basic');
     cl.toggle('sns', sns);
-    cl.toggle('feed', t === 'feed');
-    cl.toggle('tl', t === 'timeline' || t === 'timeline_dark');
-    cl.toggle('dark', t === 'timeline_dark');
+    cl.toggle('feed', layoutOf(t) === 'feed');
+    cl.toggle('tl', layoutOf(t) === 'timeline');
+    cl.toggle('dark', variantOf(t) === 'dark');
+    cl.toggle('mh', variantOf(t) === 'mh');
     const sys = sns || pref('font') === 'system';        // SNS 테마는 휴대폰 기본 글꼴
     cl.toggle('sysfont', sys);
     const sz = SIZES[sys ? 'system' : 'pixel'][pref('fontsize')] || 14;
@@ -118,10 +131,11 @@ const App = (() => {
     const title = document.querySelector('.hompy-title');
     if (title) title.textContent = t === 'retro' ? '☆ 우리집 가계부 ☆' : '우리집 가계부';
     const c = applyColors(t);
-    // 상태 표시줄 색: SNS 테마는 바탕색, 미니홈피는 진한 바탕색, 기본은 원래 색
-    let bar = t === 'timeline_dark' ? '#000000' : (sns ? '#FFFFFF' : '#24595A');
-    if (c && sns) bar = c.card;
-    else if (c && t === 'retro') bar = mix(c.bg, '#000000', 0.3);
+    // 상태 표시줄 색: 미니홈피·미니홈피 색 SNS 테마는 진한 바탕색, 밝게·어둡게는 맨 위 줄(카드) 색
+    const v = variantOf(t);
+    let bar = v === 'dark' ? '#000000' : (v === 'light' ? '#FFFFFF' : '#24595A');
+    if (c && (t === 'retro' || v === 'mh')) bar = mix(c.bg, '#000000', 0.3);
+    else if (c && sns) bar = c.card;
     try {
       if (N && N.setBars) N.setBars(bar, lum(bar) > 0.5);
     } catch (_) { /* 오래된 앱 껍데기면 무시 */ }
@@ -359,7 +373,132 @@ const App = (() => {
     reloadLedgers();
     go(tabKeys()[0]);
     setTimeout(() => { checkRecurring(); checkReminders(); }, 350);
+    setTimeout(() => checkUpdate(false), 2500);       // 켤 때 새 버전 확인 (설정 → 업데이트에서 끌 수 있음)
   }
+
+  // ── 새 버전 (GitHub 릴리스, 태그 android-v<버전>) — PC판 services/update.py 와 같은 규칙 ──
+  // 켤 때 자동 확인(설정에서 끌 수 있음) → "업데이트하시겠습니까?" → 내려받기 → "지금 설치할까요?" → 안드로이드 설치 화면
+  const UPD_PREFIX = 'android-v';
+  const UPD_HINT = '설정 → 업데이트에서 언제든 직접 새 버전을 확인하고, 내려받아 설치할 수 있습니다.';
+  const upd = { latest: null, busy: false, status: '', listeners: [] };
+  const parseVer = s => { const m = /^v?(\d+)\.(\d+)(?:\.(\d+))?$/.exec(String(s || '').trim()); return m ? [+m[1], +m[2], +(m[3] || 0)] : null; };
+  const verCmp = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+  const newerVer = (a, b) => { const x = parseVer(a), y = parseVer(b); return !!(x && y && verCmp(x, y) > 0); };
+  /** 릴리스 설명에서 '## 업데이트 내용' 바로 아래 목록(- 로 시작하는 줄)만 */
+  function notesOf(body, limit = 8) {
+    const out = [];
+    let on = false;
+    for (const line of String(body || '').split(/\r?\n/)) {
+      const t = line.trim();
+      if (!on) { on = t.startsWith('#') && t.includes('업데이트 내용'); continue; }
+      if ('-*·'.includes(t[0] || 'x')) out.push(t.replace(/^[-*·\s]+/, '').trim());
+      else if (out.length || t) break;
+    }
+    return out.slice(0, limit);
+  }
+  const relOk = r => r && typeof r === 'object' && !r.draft && !r.prerelease && String(r.tag_name || '').startsWith(UPD_PREFIX) && parseVer(String(r.tag_name).slice(UPD_PREFIX.length));
+  function pickLatest(list) {
+    let best = null;
+    for (const r of Array.isArray(list) ? list : []) {
+      if (!relOk(r)) continue;
+      const ver = String(r.tag_name).slice(UPD_PREFIX.length);
+      if (best && verCmp(parseVer(ver), parseVer(best.version)) <= 0) continue;
+      const name = `gagyebu-android-${ver}.apk`;
+      const a = (r.assets || []).find(x => x.name === name);
+      const dg = String((a && a.digest) || '');
+      best = { version: ver, tag: r.tag_name, page: r.html_url || 'https://github.com/jpnjb0918-glitch/gageybu/releases', notes: notesOf(r.body),
+        asset: a ? { name, url: a.browser_download_url || '', size: Number(a.size) || 0, sha256: dg.startsWith('sha256:') ? dg.slice(7).toLowerCase() : '' } : null };
+    }
+    return best;
+  }
+  /** 지금 판보다 새 릴리스들의 업데이트 내용 (오래된 것부터, 같은 줄은 한 번만) */
+  function changesSince(list, cur, limit = 10) {
+    const rows = (Array.isArray(list) ? list : []).filter(r => relOk(r) && newerVer(String(r.tag_name).slice(UPD_PREFIX.length), cur))
+      .map(r => [parseVer(String(r.tag_name).slice(UPD_PREFIX.length)), notesOf(r.body, 20)]).sort((a, b) => verCmp(a[0], b[0]));
+    const out = [];
+    rows.forEach(([, ns]) => ns.forEach(n => { if (!out.includes(n)) out.push(n); }));
+    return out.slice(-limit);
+  }
+  const appVersion = () => { try { return String(JSON.parse(N.appInfo()).version || ''); } catch (_) { return ''; } };
+  const updAuto = () => pref('update_auto') !== 'false';
+  function setUpdAuto(on) { setPref('update_auto', on ? null : 'false'); }
+  function updStatus(s) { upd.status = s; upd.listeners.forEach(f => { try { f(); } catch (_) { /* 화면이 바뀜 */ } }); }
+  function onUpd(f) { upd.listeners = [f]; }          // 설정 화면이 하나만 등록
+  function updSummary(l) {
+    const lines = (l.changes && l.changes.length ? l.changes : l.notes) || [];
+    return `새 버전 ${l.version}이(가) 있습니다. (지금 ${appVersion()})\n\n업데이트 내용\n` +
+      (lines.length ? lines.map(x => '· ' + x).join('\n') : '· (적힌 내용 없음 — 내려받기 페이지에서 볼 수 있어요)');
+  }
+  const yesNo = msg => UI.dialog(msg, [['아니요', '', false], ['예', 'pri', true]]);
+  /** 새 버전 확인. manual=false(켤 때)는 설정에서 끈 경우 안 하고, 인터넷이 안 되거나 최신이면 조용히 끝냄 */
+  async function checkUpdate(manual) {
+    if (upd.busy || (!manual && !updAuto())) return;
+    const cur = appVersion();
+    if (!parseVer(cur)) { if (manual) UI.alert(`이 판(${cur || '?'})은 버전 번호가 없어 새 버전을 확인할 수 없습니다.`); return; }
+    if (!manual && UI.isOpen()) { setTimeout(() => checkUpdate(false), 2000); return; }     // 예약 입력 창 등이 닫힌 뒤에
+    upd.busy = true;
+    updStatus('새 버전을 확인하는 중…');
+    const r = await nativeAsync('fetchReleases');
+    upd.busy = false;
+    let list = null;
+    if (r.ok) { try { list = JSON.parse(r.body); } catch (e) { r.ok = false; r.error = '릴리스 목록을 읽지 못했습니다'; } }
+    if (!r.ok) {
+      updStatus('확인하지 못했습니다: ' + r.error);
+      if (manual) UI.alert(`새 버전을 확인하지 못했습니다.\n인터넷 연결을 확인해 주세요.\n\n(${r.error})`);
+      return;
+    }
+    const l = pickLatest(list);
+    if (!l || !newerVer(l.version, cur)) {
+      upd.latest = null;
+      updStatus(`지금 판(${cur})이 최신입니다.`);
+      if (manual) UI.alert(`지금 판(${cur})이 최신입니다.`);
+      return;
+    }
+    l.changes = changesSince(list, cur);
+    upd.latest = l;
+    updStatus(`새 버전 ${l.version}이(가) 있습니다.`);
+    if (await yesNo(updSummary(l) + '\n\n업데이트하시겠습니까?')) downloadUpdate(l);
+    else if (!manual) UI.alert(UPD_HINT);
+  }
+  function downloadUpdate(l) {
+    if (!l || upd.busy) return;
+    if (!l.asset) { UI.alert('이 릴리스에 APK 파일이 없습니다. 내려받기 페이지를 엽니다.'); N.openExternal(l.page); return; }
+    upd.busy = true;
+    updStatus('내려받는 중…');
+    const sh = UI.sheet({ title: '새 버전 내려받기', body: `<div class="upd-dl"><div class="small">새 버전 ${U.esc(l.version)}을(를) 내려받는 중입니다.<br><span class="muted">휴대폰 알림 창에서도 볼 수 있어요.</span></div>
+      <div class="upbar"><i></i></div><div class="small muted uppct">0%</div></div>` });
+    window.__updProgress = (got, total) => {
+      const pct = total > 0 ? Math.min(100, Math.floor(got * 100 / total)) : 0;
+      const bar = UI.$('.upbar i', sh.el), txt = UI.$('.uppct', sh.el);
+      if (bar) bar.style.width = pct + '%';
+      if (txt) txt.textContent = total > 0 ? `${pct}%  (${(got / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB)` : `${(got / 1048576).toFixed(1)} MB`;
+    };
+    nativeAsync('downloadUpdate', l.asset.url, l.asset.name, String(l.asset.size || 0), l.asset.sha256 || '').then(r => {
+      upd.busy = false;
+      window.__updProgress = null;
+      sh.close();
+      if (!r.ok) { updStatus('내려받지 못했습니다: ' + r.error); UI.alert(`새 버전을 내려받지 못했습니다.\n\n(${r.error})`); return; }
+      setPref('update_file', l.asset.name);
+      setPref('update_file_ver', l.version);
+      updStatus(`새 버전 ${l.version}을(를) 내려받았습니다. 설치를 기다리는 중입니다.`);
+      askInstall(l.asset.name, l.version);
+    });
+  }
+  async function askInstall(name, ver) {
+    const yes = await yesNo(`새 버전 ${ver}을(를) 내려받았습니다.\n지금 설치할까요?\n\n안드로이드 설치 화면이 열립니다. 처음이면 '이 출처 허용'을 켜 달라는 화면이 먼저 나올 수 있어요. 가계부 자료는 그대로 남습니다.`);
+    if (!yes) { UI.alert('설정 → 업데이트의 [내려받은 새 버전 설치]로 나중에 설치할 수 있습니다.'); return; }
+    let r;
+    try { r = JSON.parse(N.installUpdate(name)); } catch (e) { r = { ok: false, error: e.message }; }
+    if (!r.ok) UI.alert('설치 화면을 열지 못했습니다.\n\n(' + r.error + ')');
+  }
+  /** 받아 두고 아직 설치하지 않은 새 버전 {name, ver} 또는 null */
+  function downloadedUpdate() {
+    const name = pref('update_file'), ver = pref('update_file_ver');
+    let has = false;
+    try { has = !!(name && N.hasUpdateFile && N.hasUpdateFile(name)); } catch (_) { has = false; }
+    return has && newerVer(ver, appVersion()) ? { name, ver } : null;
+  }
+  const updState = () => ({ latest: upd.latest, busy: upd.busy, status: upd.status, auto: updAuto(), version: appVersion(), downloaded: downloadedUpdate() });
 
   /** 백업 파일로 자료를 통째로 바꾼 뒤 (DB 다시 열고 처음 화면으로) */
   function afterReplace() {
@@ -383,7 +522,7 @@ const App = (() => {
   }
 
   return {
-    MOODS, NAV, LAYOUT, st, pref, setPref, prefJson, applyTheme, theme, isSns, go, back, navOrder, moreKeys, navLabel,
+    MOODS, NAV, LAYOUT, st, pref, layoutOf, variantOf, checkUpdate, downloadUpdate, askInstall, updState, setUpdAuto, onUpd, setPref, prefJson, applyTheme, theme, isSns, go, back, navOrder, moreKeys, navLabel,
     ledgerLayout, drawNav, navReorderSheet, layoutReorderSheet, COLOR_KEYS, baseColors, customColors, setCustomColor, render, dataChanged, fab, onBack, boot, reloadLedgers,
     updateHeader, selectLedger, afterReplace, nativeAsync, checkRecurring, ledgerName,
     get lid() { return st.lid; },

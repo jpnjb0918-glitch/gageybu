@@ -19,14 +19,23 @@ class Backdrop(QWidget):
     def __init__(self):
         super().__init__()
         self.retro = False
+        self.dots_on = None          # 미니홈피 색 SNS 테마: 이 바탕색 위에 물방울 점만 (반짝이 없음)
         rnd = random.Random(2009)
         self.sparkles = [(rnd.random(), rnd.random(), rnd.choice((2, 3)), rnd.random() < 0.7) for _ in range(28)]
 
     def paintEvent(self, _ev):
-        if not self.retro:
+        if not self.retro and not self.dots_on:
             return
         p = QPainter(self)
         W, H = self.width(), self.height()
+        if not self.retro:
+            p.fillRect(self.rect(), QColor(self.dots_on))
+            dot = QColor(T.mix(self.dots_on, '#FFFFFF', 0.1))
+            for y in range(8, H, 16):
+                for x in range(8 + (8 if (y // 16) % 2 else 0), W, 16):
+                    p.fillRect(x, y, 2, 2, dot)
+            p.end()
+            return
         p.fillRect(self.rect(), QColor(T.C['teal']))
         dot = QColor(T.C['dot'])
         for y in range(8, H, 16):

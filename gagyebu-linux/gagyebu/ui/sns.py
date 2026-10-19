@@ -72,7 +72,7 @@ def draw_avatar(p, rect, label, c, ring=False):
 
 
 class LedgerDelegate(QStyledItemDelegate):
-    """theme: 'feed' | 'timeline' | 'timeline_dark'"""
+    """theme: SNS 테마 이름 (피드·타임라인 × 미니홈피 색·밝게·어둡게). 모양은 T.layout_of 로"""
     HEAD = 34          # 날짜 머리 높이
 
     def __init__(self, table):
@@ -81,6 +81,10 @@ class LedgerDelegate(QStyledItemDelegate):
         self.theme = 'feed'
         self.day_sums = {}        # 'YYYY-MM-DD' → (수입, 지출)
         self.day_counts = {}
+
+    @property
+    def feed(self):
+        return T.layout_of(self.theme) == 'feed'
 
     def _text(self, row, col):
         it = self.table.item(row, col)
@@ -93,7 +97,7 @@ class LedgerDelegate(QStyledItemDelegate):
         fm = QFontMetrics(self.table.font())
         lh = fm.height()
         head = self.HEAD if self.first_of_day(row) else 0
-        if self.theme == 'feed':
+        if self.feed:
             return head + max(64, 2 * lh + 30)
         memo = 1 if self._text(row, C_MEMO) else 0
         return head + max(60, (2 + memo) * lh + 26)
@@ -110,12 +114,12 @@ class LedgerDelegate(QStyledItemDelegate):
         p.save()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        p.fillRect(rect, QColor(c['bg'] if self.theme == 'feed' else c['card']))
+        p.fillRect(rect, QColor(c['page']))
         date = self._text(row, C_DATE)
         if self.first_of_day(row):
             self._paint_head(p, QRectF(rect.left(), rect.top(), rect.width(), self.HEAD), date, c)
             rect = rect.adjusted(0, self.HEAD, 0, 0)
-        if self.theme == 'feed':
+        if self.feed:
             self._paint_card(p, rect, row, c, selected)
         else:
             self._paint_post(p, rect, row, c, selected)
@@ -125,7 +129,7 @@ class LedgerDelegate(QStyledItemDelegate):
         inc, exp = self.day_sums.get(date, (0, 0))
         f = QFont(p.font())
         f.setBold(True)
-        if self.theme == 'feed':
+        if self.feed:
             p.setFont(f)
             p.setPen(QColor(c['ink']))
             p.drawText(r.adjusted(16, 6, -16, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -145,7 +149,7 @@ class LedgerDelegate(QStyledItemDelegate):
                 continue
             w = QFontMetrics(f).horizontalAdvance(txt)
             p.setPen(QColor(col))
-            p.drawText(QRectF(x - w, r.top() + (6 if self.theme == 'feed' else 0), w, r.height() - (6 if self.theme == 'feed' else 0)),
+            p.drawText(QRectF(x - w, r.top() + (6 if self.feed else 0), w, r.height() - (6 if self.feed else 0)),
                        Qt.AlignmentFlag.AlignVCenter, txt)
             x -= w + 10
 
@@ -251,7 +255,7 @@ class Stories(QWidget):
         self.update()
 
     def paintEvent(self, _ev):
-        c = T.sns_colors('feed')
+        c = T.sns_colors() or T.SNS['feed']
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         f = QFont(self.font())

@@ -296,43 +296,84 @@ def retro_palette():
     return p
 
 
-# ── SNS 테마: 피드(사진 SNS 느낌) · 타임라인(짧은 글 SNS 느낌, 밝게/어둡게) ──
+# ── SNS 테마: 피드(사진 SNS 느낌) · 타임라인(짧은 글 SNS 느낌) — 각각 미니홈피 색 / 밝게 / 어둡게 ──
 # 기능·화면은 같고 색·모양과 가계부 목록 모양만 다르다. 실제 서비스의 로고·이름은 쓰지 않는다. (안드로이드판 app.css 와 같은 색)
-THEMES = ('retro', 'basic', 'feed', 'timeline', 'timeline_dark')
-SNS_THEMES = ('feed', 'timeline', 'timeline_dark')
+#   feed, timeline           : 미니홈피 색 (청록 바탕 + 흰 카드, 하늘·분홍 포인트) — 바탕 위 글자는 흰색
+#   feed_light, timeline_light: 흰 바탕
+#   feed_dark, timeline_dark : 검은 바탕
+THEMES = ('retro', 'basic', 'feed', 'feed_light', 'feed_dark', 'timeline', 'timeline_light', 'timeline_dark')
+SNS_THEMES = THEMES[2:]
+
+
+def layout_of(theme):
+    """가계부 목록 모양: 'feed' | 'timeline' | None (SNS 테마가 아님)"""
+    theme = str(theme or '')
+    return 'feed' if theme.startswith('feed') else 'timeline' if theme.startswith('timeline') else None
+
+
+def variant_of(theme):
+    """SNS 테마의 색: 'mh'(미니홈피 색) | 'light' | 'dark' | None"""
+    if layout_of(theme) is None:
+        return None
+    return 'light' if theme.endswith('_light') else 'dark' if theme.endswith('_dark') else 'mh'
+
+
+def _sns_entry(**c):
+    """빠진 열쇠 채우기: 바탕 위 글자(on_bg)·메뉴 색은 카드와 같은 바탕이면 카드 글자색 그대로"""
+    c.setdefault('page', c['bg'])                 # 가계부 목록 뒤 (피드 카드 사이)
+    c.setdefault('on_bg', c['ink'])               # 바탕 위 제목·메뉴 글자
+    c.setdefault('on_bg2', c['muted'])
+    c.setdefault('nav_hover', c['hover'])
+    c.setdefault('nav_sel_bg', c['hover'])
+    return c
+
+
+_TEAL, _TEAL_DARK = '#347C7C', '#24595A'
+_MH = dict(bg=_TEAL, card='#FFFFFF', surface='#FFFFFF', surface2='#F0FBFA', grid='#DCEEEE', ink='#1A1A1A',
+           muted='#6F8080', line='#BFE3DF', hover='#EAF9F7', scroll='#B8D8D5', dark=False,
+           on_bg='#FFFFFF', on_bg2='#B8EBE4', nav_hover='#4A8B8B', nav_sel_bg='#FFFFFF', navsel=_TEAL_DARK,
+           **{'in': '#1D5FBF', 'out': '#B8322A'})
 SNS = {
-    'feed': {'bg': '#FAFAFA', 'card': '#FFFFFF', 'surface': '#FFFFFF', 'surface2': '#F6F6F6', 'grid': '#EFEFEF',
-             'ink': '#1F1F1F', 'muted': '#8A8A8A', 'line': '#E3E3E3', 'hover': '#F1F1F1', 'sel': '#FDEBF1',
-             'accent': '#E5487E', 'accent2': '#D13A6E', 'navsel': '#1F1F1F', 'scroll': '#D0D0D0',
-             'in': '#2F6FDB', 'out': '#E0336A', 'ring': ('#FFB35C', '#FF5E7E', '#B85CFF'), 'dark': False},
-    'timeline': {'bg': '#FFFFFF', 'card': '#FFFFFF', 'surface': '#FFFFFF', 'surface2': '#F5F8FA', 'grid': '#EBEFF2',
-                 'ink': '#16191C', 'muted': '#66737F', 'line': '#E2E8EC', 'hover': '#EEF3F6', 'sel': '#E7F3FC',
-                 'accent': '#1D8FE1', 'accent2': '#1A7FC8', 'navsel': '#1D8FE1', 'scroll': '#CCD6DD',
-                 'in': '#1D8FE1', 'out': '#E0336A', 'ring': None, 'dark': False},
-    'timeline_dark': {'bg': '#000000', 'card': '#000000', 'surface': '#0E1114', 'surface2': '#15191D', 'grid': '#23282D',
-                      'ink': '#E6E8EA', 'muted': '#8B9096', 'line': '#2C3238', 'hover': '#16191C', 'sel': '#0D2A40',
-                      'accent': '#2A9BEA', 'accent2': '#3AA7F0', 'navsel': '#E6E8EA', 'scroll': '#3A4148',
-                      'in': '#52AEF2', 'out': '#F45C84', 'ring': None, 'dark': True},
+    'feed': _sns_entry(**dict(_MH, page='#EAF9F7', sel='#FFE3EC', accent='#E0507A', accent2='#C93F68',
+                              ring=('#4BD5D5', '#FF8FB1', '#FFE066'))),
+    'feed_light': _sns_entry(bg='#FAFAFA', card='#FFFFFF', surface='#FFFFFF', surface2='#F6F6F6', grid='#EFEFEF',
+                             ink='#1F1F1F', muted='#8A8A8A', line='#E3E3E3', hover='#F1F1F1', sel='#FDEBF1',
+                             accent='#E5487E', accent2='#D13A6E', navsel='#1F1F1F', scroll='#D0D0D0',
+                             ring=('#FFB35C', '#FF5E7E', '#B85CFF'), dark=False, **{'in': '#2F6FDB', 'out': '#E0336A'}),
+    'feed_dark': _sns_entry(bg='#000000', card='#000000', surface='#121212', surface2='#1A1A1A', grid='#262626',
+                            ink='#F2F2F2', muted='#A0A0A0', line='#333333', hover='#1C1C1C', sel='#3A1424',
+                            accent='#F0568C', accent2='#F46F9C', navsel='#F2F2F2', scroll='#444444',
+                            ring=('#FFB35C', '#FF5E7E', '#B85CFF'), dark=True, **{'in': '#5B9BF5', 'out': '#F45C84'}),
+    'timeline': _sns_entry(**dict(_MH, page='#FFFFFF', sel='#DFF5F2', accent=_TEAL, accent2=_TEAL_DARK, ring=None)),
+    'timeline_light': _sns_entry(bg='#FFFFFF', card='#FFFFFF', surface='#FFFFFF', surface2='#F5F8FA', grid='#EBEFF2',
+                                 ink='#16191C', muted='#66737F', line='#E2E8EC', hover='#EEF3F6', sel='#E7F3FC',
+                                 accent='#1D8FE1', accent2='#1A7FC8', navsel='#1D8FE1', scroll='#CCD6DD',
+                                 ring=None, dark=False, **{'in': '#1D8FE1', 'out': '#E0336A'}),
+    'timeline_dark': _sns_entry(bg='#000000', card='#000000', surface='#0E1114', surface2='#15191D', grid='#23282D',
+                                ink='#E6E8EA', muted='#8B9096', line='#2C3238', hover='#16191C', sel='#0D2A40',
+                                accent='#2A9BEA', accent2='#3AA7F0', navsel='#E6E8EA', scroll='#3A4148',
+                                ring=None, dark=True, **{'in': '#52AEF2', 'out': '#F45C84'}),
 }
 AV_COLORS = ('#E8833A', '#E0525B', '#9457D6', '#3B7DDD', '#2E9E5B', '#139A9A', '#D24E8E', '#66788F')
 
 SNS_QSS = """
-QMainWindow, QDialog, QMessageBox { background: %(bg)s; }
+QMainWindow { background: %(bg)s; }
+QDialog, QMessageBox { background: %(card)s; }
 QWidget { color: %(ink)s; }
 QToolTip { background: %(ink)s; color: %(card)s; border: none; border-radius: 6px; padding: 4px 8px; }
 QStatusBar { background: %(card)s; color: %(muted)s; border-top: 1px solid %(line)s; }
 QStatusBar QLabel { color: %(muted)s; }
 QFrame#Hompy, QFrame#MainBox { background: %(card)s; border: none; }
 QFrame#MainBox QScrollArea, QFrame#MainBox QStackedWidget { background: transparent; }
-QLabel#HompyTitle { color: %(ink)s; font-size: 15pt; font-weight: 800; }
+QLabel#HompyTitle { color: %(on_bg)s; font-size: 15pt; font-weight: 800; }
 QLabel#TodayLabel { background: %(surface2)s; border-radius: 12px; padding: 3px 12px; }
-QLabel#LedgerLabel { color: %(muted)s; }
+QLabel#LedgerLabel { color: %(on_bg2)s; }
 
 /* 왼쪽 메뉴 */
 QListWidget#TabNav { background: transparent; border: none; outline: none; font-size: 11pt; }
-QListWidget#TabNav::item { padding: 9px 14px; margin: 1px 0px; border-radius: 19px; color: %(ink)s; }
-QListWidget#TabNav::item:hover { background: %(hover)s; }
-QListWidget#TabNav::item:selected { background: %(hover)s; color: %(navsel)s; }
+QListWidget#TabNav::item { padding: 9px 14px; margin: 1px 0px; border-radius: 19px; color: %(on_bg)s; }
+QListWidget#TabNav::item:hover { background: %(nav_hover)s; }
+QListWidget#TabNav::item:selected { background: %(nav_sel_bg)s; color: %(navsel)s; }
 
 /* 버튼: 둥근 알약 모양 */
 QPushButton { background: %(surface)s; color: %(ink)s; border: 1px solid %(line)s; border-radius: 15px;
@@ -537,14 +578,23 @@ def _sns_colors(theme):
     if not cu:
         return base
     c = effective_colors(theme)
-    card, ink, acc = c['card'], c['ink'], c['accent']
+    bg, card, ink, acc = c['bg'], c['card'], c['ink'], c['accent']
     dark = lum(card) < 0.18
-    base.update({'bg': c['bg'], 'card': card, 'ink': ink, 'accent': acc, 'in': c['in'], 'out': c['out'],
+    hover = mix(card, ink, 0.07)
+    # 바탕이 카드와 확 다르면 (미니홈피 색처럼) 바탕 위 제목·메뉴 글자를 바탕에 맞춰 따로 정함
+    sep = abs(lum(bg) - lum(card)) > 0.25
+    on_bg = ('#FFFFFF' if lum(bg) < 0.4 else '#1A1A1A') if sep else ink
+    feed = layout_of(theme) == 'feed'
+    base.update({'bg': bg, 'card': card, 'ink': ink, 'accent': acc, 'in': c['in'], 'out': c['out'],
                  'surface': mix(card, ink, 0.06) if dark else card, 'surface2': mix(card, ink, 0.045),
                  'grid': mix(card, ink, 0.09), 'muted': mix(ink, card, 0.45), 'line': mix(card, ink, 0.14),
-                 'hover': mix(card, ink, 0.07), 'sel': mix(card, acc, 0.15), 'accent2': mix(acc, '#000000', 0.1),
-                 'navsel': acc if theme == 'timeline' else ink, 'scroll': mix(card, ink, 0.25), 'dark': dark})
-    if theme == 'feed' and 'accent' in cu:
+                 'hover': hover, 'sel': mix(card, acc, 0.15), 'accent2': mix(acc, '#000000', 0.1),
+                 'navsel': ink if sep else (acc if theme == 'timeline_light' else ink),
+                 'scroll': mix(card, ink, 0.25), 'dark': dark,
+                 'page': (mix(card, bg, 0.1) if sep else bg) if feed else card,
+                 'on_bg': on_bg, 'on_bg2': mix(on_bg, bg, 0.3), 'nav_hover': mix(bg, on_bg, 0.12) if sep else hover,
+                 'nav_sel_bg': card if sep else hover})
+    if feed and 'accent' in cu:
         base['ring'] = (mix(acc, '#FFC861', 0.55), acc, mix(acc, '#8B5CF6', 0.55))
     return base
 
@@ -621,7 +671,8 @@ def set_input_side(side):
 
 def sns_palette(c):
     p = QPalette()
-    g = {QPalette.ColorRole.Window: c['bg'], QPalette.ColorRole.WindowText: c['ink'],
+    # Window = 화면(카드) 바탕. 창 바깥 바탕(bg)은 스타일시트의 QMainWindow 가 칠함 — 스크롤 영역 안 화면이 Window 로 칠해지므로
+    g = {QPalette.ColorRole.Window: c['card'], QPalette.ColorRole.WindowText: c['ink'],
          QPalette.ColorRole.Base: c['surface'], QPalette.ColorRole.AlternateBase: c['surface2'],
          QPalette.ColorRole.Text: c['ink'], QPalette.ColorRole.Button: c['surface'],
          QPalette.ColorRole.ButtonText: c['ink'], QPalette.ColorRole.Highlight: c['accent'],

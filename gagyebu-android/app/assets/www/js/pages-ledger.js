@@ -186,7 +186,7 @@ Pages.ledger = (() => {
         <ul class="list">${list.map(([r, b]) => snsRow(r, b, cmap, false)).join('')}</ul>
         <footer class="pf"><span class="heart">♡</span>${di ? `<span>수입 <b class="in">+${UI.money(di)}</b></span>` : ''}${de ? `<span>지출 <b class="out">-${UI.money(de)}</b></span>` : ''}</footer></article>`;
     }
-    if (theme === 'timeline' || theme === 'timeline_dark') {
+    if (theme === 'timeline') {
       return `<div class="tl-day"><span>${U.dateLabel(d)}</span><span class="sums">${sums}${ord}</span></div>
         <ul class="list tw-list">${list.map(([r, b]) => snsRow(r, b, cmap, true)).join('')}</ul>`;
     }
@@ -207,7 +207,7 @@ Pages.ledger = (() => {
 
   function render(c, p, tools) {
     const lid = App.lid;
-    const theme = App.theme();
+    const theme = App.layoutOf(App.theme()) || App.theme();     // 'feed' | 'timeline' | 'retro' | 'basic'
     const start = U.iso(s.y, s.m, 1), end = U.iso(s.y, s.m, U.monthEnd(s.y, s.m));
     let rows = s.all ? L.entriesWithBalance(lid) : L.entriesWithBalance(lid, start, end);
     if (s.desc) rows = Ord.applyDayOrder(rows, Ord.dayOrders(lid), true);   // 최근 날짜 위로 (순서를 정한 날은 그 순서 그대로)

@@ -114,6 +114,8 @@ class MainWindow(QMainWindow):
         from .ui.reports_page import ReportsPage
         from .ui.search_page import SearchPage
         from .ui.settings_page import SettingsPage
+        from .ui.update_ui import Updater
+        self.updater = Updater(self)                  # 새 버전 확인·내려받기·설치 (설정 → 업데이트 탭도 씀)
         self.pages = [LedgerPage(self), SearchPage(self), ReportsPage(self), GraphPage(self), RecurringPage(self),
                       AssetsPage(self), CalendarPage(self), AddressPage(self), DiaryPage(self), MemoPage(self),
                       SettingsPage(self)]
@@ -172,6 +174,8 @@ class MainWindow(QMainWindow):
         retro = theme == 'retro'
         sns = theme in TH.SNS_THEMES
         self.backdrop.retro = retro
+        self.backdrop.dots_on = TH.sns_colors(theme)['bg'] if TH.variant_of(theme) == 'mh' else None
+        self.backdrop.update()
         for w in (self.hompy_caption, self.profile, self.banner):
             w.setVisible(retro)
         for w in (self.today_lbl, self.hompy_title):
@@ -457,6 +461,7 @@ def main(argv=None):
     w.data_changed()
     w.check_reminders()
     w.check_recurring()
+    w.updater.check_later()                         # 켤 때 새 버전 확인 (설정 → 업데이트에서 끌 수 있음)
     rc = app.exec()
     w.deleteLater()            # 창을 먼저 정리한 뒤 종료 (종료 순서 문제로 인한 비정상 종료 방지)
     app.processEvents()

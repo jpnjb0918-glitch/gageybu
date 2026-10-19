@@ -393,6 +393,6 @@ const UI = (() => {
   }
 
   return { $, $$, el, on, sticker, money, moneyCls, toast, sheet, closeTop, isOpen, alert: alertBox, confirm,
-    formHtml, form, readForm, formSheet, bindMoney, codeOptions, monthNav, yearNav, monthPicker, seg, empty, reorder, colorPicker,
+    formHtml, form, readForm, formSheet, bindMoney, codeOptions, monthNav, yearNav, monthPicker, seg, dialog, empty, reorder, colorPicker,
     normHex, hexToHsl, hslToHex };
 })();

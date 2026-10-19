@@ -270,7 +270,7 @@ class LedgerPage(QWidget):
             t.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
             hh.setSectionResizeMode(C_ITEM, QHeaderView.ResizeMode.ResizeToContents)
             hh.setSectionResizeMode(C_MEMO, QHeaderView.ResizeMode.Stretch)
-        feed = theme == 'feed'
+        feed = T.layout_of(theme) == 'feed'
         self.stories.setVisible(feed and bool(rows))
         if feed:
             by = {}

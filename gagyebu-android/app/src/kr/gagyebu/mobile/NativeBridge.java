@@ -959,6 +959,237 @@ public class NativeBridge {
         copy(new FileInputStream(src), new FileOutputStream(dst));
     }
 
+    // ── 새 버전 (GitHub 릴리스) ──────────────────────────
+    // 가계부 자료는 보내지 않는다. 공개 릴리스 목록(JSON)을 읽고, 정해진 주소의 APK 만 받는다.
+    private static final String RELEASES_API = "https://api.github.com/repos/jpnjb0918-glitch/gageybu/releases?per_page=30";
+    private static final String DOWNLOAD_PREFIX = "https://github.com/jpnjb0918-glitch/gageybu/releases/download/";
+    private static final String APK_NAME = "[A-Za-z0-9._-]+\\.apk";
+    private volatile long updId = -1;
+
+    /** 릴리스 목록을 받아 cb 로 {"ok":true,"body":"<JSON 글>"} (다른 스레드에서) */
+    @JavascriptInterface
+    public void fetchReleases(final String cb) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                JSONObject res;
+                java.net.HttpURLConnection c = null;
+                try {
+                    c = (java.net.HttpURLConnection) new java.net.URL(RELEASES_API).openConnection();
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(12000);
+                    c.setRequestProperty("Accept", "application/vnd.github+json");
+                    c.setRequestProperty("User-Agent", "gagyebu-android-updater");
+                    int code = c.getResponseCode();
+                    if (code != 200) {
+                        throw new Exception("HTTP " + code);
+                    }
+                    InputStream in = c.getInputStream();
+                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                    try {
+                        byte[] buf = new byte[16384];
+                        int n;
+                        while ((n = in.read(buf)) > 0) {
+                            bo.write(buf, 0, n);
+                            if (bo.size() > 4 * 1024 * 1024) {
+                                throw new Exception("응답이 너무 큽니다");
+                            }
+                        }
+                    } finally {
+                        in.close();
+                    }
+                    res = ok();
+                    res.put("body", new String(bo.toByteArray(), StandardCharsets.UTF_8));
+                } catch (Throwable e) {
+                    res = errObj(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                } finally {
+                    if (c != null) {
+                        c.disconnect();
+                    }
+                }
+                callback(cb, res);
+            }
+        }).start();
+    }
+
+    private File updDir() {
+        return act.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS);
+    }
+
+    /** 새 APK 받기 (시스템 내려받기 관리자 → 알림 창에도 진행 표시).
+     *  진행: window.__updProgress(받은, 전체). 끝나면 cb 로 {"ok":true,"name":...} — 크기·SHA-256 이 맞을 때만.
+     *  설치는 하지 않음 (설치할지 물은 뒤 installUpdate). */
+    @JavascriptInterface
+    public void downloadUpdate(final String url, final String fileName, final String size, final String sha256, final String cb) {
+        if (url == null || !url.startsWith(DOWNLOAD_PREFIX) || fileName == null || !fileName.matches(APK_NAME)) {
+            callback(cb, errObj("업데이트 파일 주소가 올바르지 않습니다"));
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                JSONObject res;
+                try {
+                    long expect = 0;
+                    try {
+                        expect = Long.parseLong(size);
+                    } catch (Exception ignored) {
+                    }
+                    android.app.DownloadManager dm = (android.app.DownloadManager) act.getSystemService(android.content.Context.DOWNLOAD_SERVICE);
+                    File dir = updDir();
+                    if (dm == null || dir == null) {
+                        throw new Exception("이 휴대폰에서는 내려받기를 쓸 수 없습니다");
+                    }
+                    if (updId >= 0) {
+                        try {
+                            dm.remove(updId);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    File[] olds = dir.listFiles();               // 예전에 받은 APK 정리
+                    if (olds != null) {
+                        for (File f : olds) {
+                            f.delete();
+                        }
+                    }
+                    android.app.DownloadManager.Request rq = new android.app.DownloadManager.Request(Uri.parse(url));
+                    rq.setTitle("우리집 가계부 새 버전");
+                    rq.setDescription(fileName);
+                    rq.setMimeType("application/vnd.android.package-archive");
+                    rq.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE);
+                    rq.setDestinationInExternalFilesDir(act, android.os.Environment.DIRECTORY_DOWNLOADS, fileName);
+                    long id = dm.enqueue(rq);
+                    updId = id;
+                    while (true) {
+                        Thread.sleep(500);
+                        Cursor q = dm.query(new android.app.DownloadManager.Query().setFilterById(id));
+                        if (q == null) {
+                            throw new Exception("내려받기 상태를 알 수 없습니다");
+                        }
+                        int st;
+                        long got, tot;
+                        int reason;
+                        try {
+                            if (!q.moveToFirst()) {
+                                throw new Exception("내려받기가 취소되었습니다");
+                            }
+                            st = q.getInt(q.getColumnIndex(android.app.DownloadManager.COLUMN_STATUS));
+                            got = q.getLong(q.getColumnIndex(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                            tot = q.getLong(q.getColumnIndex(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                            reason = q.getInt(q.getColumnIndex(android.app.DownloadManager.COLUMN_REASON));
+                        } finally {
+                            q.close();
+                        }
+                        updProgress(got, tot > 0 ? tot : expect);
+                        if (st == android.app.DownloadManager.STATUS_SUCCESSFUL) {
+                            break;
+                        }
+                        if (st == android.app.DownloadManager.STATUS_FAILED) {
+                            throw new Exception("내려받지 못했습니다 (이유 코드 " + reason + ")");
+                        }
+                    }
+                    File f = new File(dir, fileName);
+                    if (!f.isFile() || (expect > 0 && f.length() != expect)) {
+                        throw new Exception("받은 파일 크기가 릴리스에 적힌 것과 다릅니다");
+                    }
+                    if (sha256 != null && !sha256.isEmpty() && !sha256.equalsIgnoreCase(sha256Hex(f))) {
+                        dm.remove(id);
+                        f.delete();
+                        throw new Exception("받은 파일이 릴리스에 적힌 것과 다릅니다 (SHA-256)");
+                    }
+                    res = ok();
+                    res.put("name", fileName);
+                } catch (Throwable e) {
+                    res = errObj(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                }
+                callback(cb, res);
+            }
+        }).start();
+    }
+
+    /** 받아 둔 APK 가 있는지 */
+    @JavascriptInterface
+    public boolean hasUpdateFile(String fileName) {
+        File dir = updDir();
+        return dir != null && fileName != null && fileName.matches(APK_NAME) && new File(dir, fileName).isFile();
+    }
+
+    /** 받아 둔 APK 의 설치 화면 열기 (안드로이드가 '이 출처 허용'과 설치 확인을 따로 물음) */
+    @JavascriptInterface
+    public String installUpdate(String fileName) {
+        try {
+            File dir = updDir();
+            if (dir == null || fileName == null || !fileName.matches(APK_NAME) || !new File(dir, fileName).isFile()) {
+                return errObj("받아 둔 설치 파일이 없습니다. 다시 내려받아 주세요.").toString();
+            }
+            android.app.DownloadManager dm = (android.app.DownloadManager) act.getSystemService(android.content.Context.DOWNLOAD_SERVICE);
+            long id = updId;
+            if (id < 0) {                    // 앱을 다시 켠 뒤: 내려받기 목록에서 그 파일 찾기
+                Cursor q = dm.query(new android.app.DownloadManager.Query().setFilterByStatus(android.app.DownloadManager.STATUS_SUCCESSFUL));
+                if (q != null) {
+                    try {
+                        while (q.moveToNext()) {
+                            String local = q.getString(q.getColumnIndex(android.app.DownloadManager.COLUMN_LOCAL_URI));
+                            if (local != null && local.endsWith("/" + fileName)) {
+                                id = q.getLong(q.getColumnIndex(android.app.DownloadManager.COLUMN_ID));
+                            }
+                        }
+                    } finally {
+                        q.close();
+                    }
+                }
+            }
+            Uri uri = id >= 0 ? dm.getUriForDownloadedFile(id) : null;
+            if (uri == null) {
+                return errObj("받아 둔 설치 파일을 찾지 못했습니다. 다시 내려받아 주세요.").toString();
+            }
+            final Intent it = new Intent(Intent.ACTION_VIEW);
+            it.setDataAndType(uri, "application/vnd.android.package-archive");
+            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        act.startActivity(it);
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
+            return ok().toString();
+        } catch (Throwable e) {
+            return err(e);
+        }
+    }
+
+    private void updProgress(long got, long total) {
+        final String js = "window.__updProgress&&window.__updProgress(" + got + "," + total + ")";
+        web.post(new Runnable() {
+            @Override
+            public void run() {
+                web.evaluateJavascript(js, null);
+            }
+        });
+    }
+
+    private static String sha256Hex(File f) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        InputStream in = new FileInputStream(f);
+        try {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                md.update(buf, 0, n);
+            }
+        } finally {
+            in.close();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : md.digest()) {
+            sb.append(String.format(Locale.ROOT, "%02x", b & 0xff));
+        }
+        return sb.toString();
+    }
+
     private void callback(String cb, JSONObject res) {
         if (cb == null) {
             return;

@@ -527,9 +527,10 @@ class ThemeTab(QWidget):
         self.theme = QComboBox()
         self.theme.addItem('미니홈피 (2000년대 감성)', 'retro')
         self.theme.addItem('기본 (처음 화면)', 'basic')
-        self.theme.addItem('피드 (사진 SNS 느낌)', 'feed')
-        self.theme.addItem('타임라인 (짧은 글 SNS 느낌, 밝게)', 'timeline')
-        self.theme.addItem('타임라인 (짧은 글 SNS 느낌, 어둡게)', 'timeline_dark')
+        for key, label in (('feed', '피드 · 미니홈피 색 (사진 SNS 느낌)'), ('feed_light', '피드 · 밝게'),
+                           ('feed_dark', '피드 · 어둡게'), ('timeline', '타임라인 · 미니홈피 색 (짧은 글 SNS 느낌)'),
+                           ('timeline_light', '타임라인 · 밝게'), ('timeline_dark', '타임라인 · 어둡게')):
+            self.theme.addItem(label, key)
         self.font = QComboBox()
         self.font.addItem('도트 글꼴 (갈무리11)', 'pixel')
         self.font.addItem('시스템 글꼴', 'system')
@@ -674,6 +675,80 @@ class ThemeTab(QWidget):
             self.refresh()
 
 
+class UpdateTab(QWidget):
+    """새 버전 확인 · 내려받기 · 설치 (켤 때 자동 확인은 여기서 끌 수 있음)"""
+
+    def __init__(self, page):
+        super().__init__()
+        self.page = page
+        from .. import EDITION, __version__
+        from ..services import update as U
+        from . import update_ui as UI
+        self.U, self.UI, self.cur = U, UI, __version__
+        self.upd = page.app.updater
+        self.ver = QLabel(f'지금 판: {EDITION} {__version__}   ·   설치 방식: {U.KIND_LABEL.get(self.upd.kind, self.upd.kind)}')
+        self.auto = QCheckBox('프로그램을 켤 때 새 버전이 있는지 자동으로 확인')
+        self.auto.setChecked(UI.auto_enabled())
+        self.auto.toggled.connect(UI.set_auto)
+        self.check_btn = button('업데이트 확인', self.check)
+        self.dl_btn = button('새 버전 내려받기', self.download)
+        self.inst_btn = button('내려받은 새 버전 설치', self.install)
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        self.notes = QLabel()
+        self.notes.setWordWrap(True)
+        self.notes.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        box = QGroupBox('새 버전')
+        bl = QVBoxLayout(box)
+        bl.addWidget(self.ver)
+        bl.addWidget(self.auto)
+        bl.addWidget(h(self.check_btn, self.dl_btn, self.inst_btn, 'stretch'))
+        bl.addWidget(self.status)
+        bl.addWidget(self.notes)
+        note = QLabel('· 새 버전 확인 때는 GitHub 의 공개 릴리스 목록만 읽습니다. 가계부 자료는 어디에도 보내지 않습니다.\n'
+                      '· 받은 설치 파일은 릴리스에 적힌 크기·SHA-256 과 맞을 때만 설치합니다.\n'
+                      '· 윈도우 휴대용·직접 설치한 경우는 자동 설치가 되지 않아 내려받기 페이지를 엽니다.')
+        note.setWordWrap(True)
+        note.setStyleSheet('color:#777')
+        lay = QVBoxLayout(self)
+        lay.addWidget(box)
+        lay.addWidget(note)
+        lay.addStretch(1)
+        self.upd.changed.connect(self.refresh)
+        self.refresh()
+
+    def refresh(self):
+        u = self.upd
+        rel = u.latest
+        done = u.downloaded()
+        self.status.setText(u.status or '아직 확인하지 않았습니다. [업데이트 확인]을 누르세요.')
+        if rel:
+            lines = rel.get('changes') or rel.get('notes') or []
+            self.notes.setText(f'새 버전 {rel["version"]} 업데이트 내용\n' + '\n'.join(f'· {x}' for x in lines))
+        else:
+            self.notes.setText('')
+        self.notes.setVisible(bool(rel))
+        self.check_btn.setEnabled(not u.busy)
+        self.dl_btn.setEnabled(not u.busy and bool(rel) and not (done and done[1] == rel['version']))
+        self.inst_btn.setEnabled(not u.busy and bool(done))
+        self.inst_btn.setText(f'내려받은 새 버전 {done[1]} 설치' if done else '내려받은 새 버전 설치')
+
+    def check(self):
+        self.upd.check(manual=True, parent=self)
+
+    def download(self):
+        if self.upd.latest:
+            if self.upd.kind in self.U.AUTO_KINDS:
+                self.upd.download(self.upd.latest, self)
+            else:
+                self.UI.open_url(self.upd.latest['page'])
+
+    def install(self):
+        done = self.upd.downloaded()
+        if done:
+            self.upd.ask_install(done[0], done[1], self)
+
+
 class SettingsPage(QWidget):
     title = '설정'
 
@@ -682,8 +757,9 @@ class SettingsPage(QWidget):
         self.app, self.con = app, app.con
         self.tabs = QTabWidget()
         self.parts = [CategoryTab(self), LedgerTab(self), ItemTab(self), GeneralTab(self), ImportTab(self),
-                      ThemeTab(self)]
-        for p, n in zip(self.parts, ['계정과목', '장부 관리', '품목 관리', '암호 · 백업', '자료 가져오기', '화면 꾸미기']):
+                      ThemeTab(self), UpdateTab(self)]
+        for p, n in zip(self.parts, ['계정과목', '장부 관리', '품목 관리', '암호 · 백업', '자료 가져오기', '화면 꾸미기',
+                                     '업데이트']):
             self.tabs.addTab(p, n)
         self.tabs.currentChanged.connect(lambda i: self.parts[i].refresh())
         QVBoxLayout(self).addWidget(self.tabs)

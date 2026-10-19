@@ -20,6 +20,8 @@ Pages.settings = (() => {
         <div class="row wrap"><button class="btn sm" data-a="pw">${hasPw ? '암호 변경' : '암호 설정'}</button>${hasPw ? '<button class="btn sm" data-a="pwoff">암호 해제</button>' : ''}</div>`)}
       <div id="deco"></div>
       ${sec('화면 꾸미기', decoHtml())}
+      <div id="upd"></div>
+      ${sec('업데이트', '<div class="updbox"></div>')}
       ${sec('앱 정보', infoHtml())}
     </div>`));
     const act = {
@@ -28,7 +30,11 @@ Pages.settings = (() => {
     };
     UI.on(c, '[data-a]', 'click', (e, b) => act[b.dataset.a]());
     bindDeco(c);
+    const ub = UI.$('.updbox', c);
+    drawUpd(ub);
+    App.onUpd(() => { if (ub.isConnected) drawUpd(ub); });
     if (p && p.section === 'deco') setTimeout(() => UI.$('#deco').scrollIntoView(), 50);
+    if (p && p.section === 'update') setTimeout(() => UI.$('#upd').scrollIntoView(), 50);
   }
 
   // ── 장부 관리 ──
@@ -187,7 +193,7 @@ Pages.settings = (() => {
   // ── 화면 꾸미기 (이 휴대폰에만 저장) ──
   function decoHtml() {
     return `<div class="form">
-      <div class="f"><label class="l">테마</label><select data-p="theme"><option value="retro">미니홈피 (2000년대 감성)</option><option value="basic">기본 (깔끔하게)</option><option value="feed">피드 (사진 SNS 느낌)</option><option value="timeline">타임라인 (짧은 글 SNS 느낌, 밝게)</option><option value="timeline_dark">타임라인 (짧은 글 SNS 느낌, 어둡게)</option></select><div class="hint">피드·타임라인 테마는 휴대폰 기본 글꼴을 쓰고, 가계부 목록이 피드·타임라인 모양으로 바뀝니다. 기능은 같습니다.</div></div>
+      <div class="f"><label class="l">테마</label><select data-p="theme"><option value="retro">미니홈피 (2000년대 감성)</option><option value="basic">기본 (깔끔하게)</option><option value="feed">피드 · 미니홈피 색 (사진 SNS 느낌)</option><option value="feed_light">피드 · 밝게</option><option value="feed_dark">피드 · 어둡게</option><option value="timeline">타임라인 · 미니홈피 색 (짧은 글 SNS 느낌)</option><option value="timeline_light">타임라인 · 밝게</option><option value="timeline_dark">타임라인 · 어둡게</option></select><div class="hint">피드·타임라인 테마는 휴대폰 기본 글꼴을 쓰고, 가계부 목록이 피드·타임라인 모양으로 바뀝니다. 기능은 같습니다. 색은 미니홈피 색·밝게·어둡게 중에서 고릅니다.</div></div>
       <div class="f"><label class="l">글꼴</label><select data-p="font"><option value="pixel">도트 글꼴 (갈무리)</option><option value="system">휴대폰 기본 글꼴</option></select></div>
       <div class="f"><label class="l">글자 크기</label><select data-p="fontsize"><option value="s">작게</option><option value="m">보통</option><option value="l">크게</option><option value="xl">아주 크게</option></select></div>
       <div class="f"><label class="l">순서</label><div class="row wrap"><button class="btn sm" data-ord="nav">메뉴 순서</button><button class="btn sm" data-ord="layout">가계부 화면 구성</button></div>
@@ -244,6 +250,25 @@ Pages.settings = (() => {
         onPick: hex => { App.setCustomColor(k, hex); drawColors(c); },
         onReset: () => { App.setCustomColor(k, null); drawColors(c); } });
     });
+  }
+  // ── 업데이트: 자동 확인 켜기·끄기, 직접 확인·내려받기·설치 ──
+  function drawUpd(box) {
+    const s = App.updState(), l = s.latest, d = s.downloaded;
+    const lines = l ? ((l.changes && l.changes.length ? l.changes : l.notes) || []) : [];
+    box.innerHTML = `<div class="small" style="margin-bottom:6px">지금 판: ${U.esc(s.version || '?')}</div>
+      <label class="check"><input type="checkbox" data-u="auto"${s.auto ? ' checked' : ''}> 앱을 켤 때 새 버전이 있는지 자동으로 확인</label>
+      <div class="row wrap" style="margin-top:6px"><button class="btn sm pri" data-u="check"${s.busy ? ' disabled' : ''}>업데이트 확인</button>
+        ${l && !(d && d.ver === l.version) ? `<button class="btn sm" data-u="dl"${s.busy ? ' disabled' : ''}>새 버전 ${U.esc(l.version)} 내려받기</button>` : ''}
+        ${d ? `<button class="btn sm" data-u="inst"${s.busy ? ' disabled' : ''}>내려받은 새 버전 ${U.esc(d.ver)} 설치</button>` : ''}</div>
+      <div class="small upd-st" style="margin-top:6px">${U.esc(s.status || '아직 확인하지 않았습니다.')}</div>
+      ${l ? `<div class="small upd-notes"><b>새 버전 ${U.esc(l.version)} 업데이트 내용</b><br>${lines.map(x => '· ' + U.esc(x)).join('<br>') || '· (적힌 내용 없음)'}</div>` : ''}
+      <div class="small muted" style="margin-top:6px">새 버전 확인 때는 GitHub 의 공개 릴리스 목록만 읽습니다. 가계부 자료는 보내지 않습니다. 받은 파일은 릴리스에 적힌 크기·SHA-256 과 맞을 때만 설치 화면을 엽니다.</div>`;
+    UI.$('[data-u=auto]', box).onchange = e => App.setUpdAuto(e.target.checked);
+    UI.$('[data-u=check]', box).onclick = () => App.checkUpdate(true);
+    const dl = UI.$('[data-u=dl]', box);
+    if (dl) dl.onclick = () => App.downloadUpdate(App.updState().latest);
+    const inst = UI.$('[data-u=inst]', box);
+    if (inst) inst.onclick = () => { const x = App.updState().downloaded; if (x) App.askInstall(x.name, x.ver); };
   }
   function infoHtml() {
     let info = {};

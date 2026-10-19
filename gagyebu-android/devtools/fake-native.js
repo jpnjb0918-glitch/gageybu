@@ -90,7 +90,25 @@
       getPrefs() { return JSON.stringify(st.prefs); },
       setPref(k, v) { if (v === null) delete st.prefs[k]; else st.prefs[k] = v; },
       setBars(color, light) { st.bars = [color, light]; },
-      appInfo() { return ok({ version: 'dev', versionCode: 0, sdk: 0, dbPath: 'memory', dbSize: db.export().length }); },
+      appInfo() { return ok({ version: st.appVersion || 'dev', versionCode: 0, sdk: 0, dbPath: 'memory', dbSize: db.export().length }); },
+      // 새 버전: 시험이 st.releases(배열 또는 'fail')·st.dlResult 를 정해 둠. 받은 파일·설치 화면 열기는 기록만
+      fetchReleases(cb) {
+        st.updCalls = (st.updCalls || 0) + 1;
+        if (st.releases === 'fail') { later(cb, { ok: false, error: 'Unable to resolve host "api.github.com"' }); return; }
+        later(cb, { ok: true, body: JSON.stringify(st.releases || []) });
+      },
+      downloadUpdate(url, name, size, sha, cb) {
+        st.downloads = (st.downloads || []).concat([{ url, name, size, sha }]);
+        const total = Number(size) || 1000;
+        [0.3, 0.7, 1].forEach((f, i) => setTimeout(() => window.__updProgress && window.__updProgress(Math.round(total * f), total), 100 + i * 200));
+        setTimeout(() => {
+          const r = st.dlResult || { ok: true, name };
+          if (r.ok) st.files = Object.assign(st.files || {}, { [name]: true });
+          window.__nativeDone(cb, r);
+        }, 800);
+      },
+      hasUpdateFile(name) { return !!(st.files && st.files[name]); },
+      installUpdate(name) { st.installs = (st.installs || []).concat([name]); return ok({}); },
       autoBackup() { return ok({ skipped: true }); },
       listBackups() { return ok({ items: [] }); },
       restoreBackup() { return err('시험 환경에는 보관본이 없습니다'); },

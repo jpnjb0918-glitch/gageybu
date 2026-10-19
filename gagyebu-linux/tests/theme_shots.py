@@ -82,7 +82,7 @@ for th in TH.THEMES:
         visible = [c for c in range(t.columnCount()) if not t.isColumnHidden(c)]
         assert visible == ([1] if sns else list(range(7))), (th, visible)
         assert (t.rowHeight(0) >= 60) == sns, (th, t.rowHeight(0))
-        assert lp.stories.isVisible() == (th == 'feed'), th
+        assert lp.stories.isVisible() == (TH.layout_of(th) == 'feed'), th
         # 한 줄 고르면 입력칸에 그 내역이 들어오는지 (수정 기능)
         t.clearSelection()
         t.selectRow(2)

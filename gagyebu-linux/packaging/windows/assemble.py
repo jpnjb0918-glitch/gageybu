@@ -153,7 +153,7 @@ def main():
                 '  packaging/windows/mdbtools-win.patch\n'
                 '- 갈무리 글꼴 (SIL OFL 1.1): Galmuri-OFL.txt\n'
                 '- korean_lunar_calendar (MIT): korean_lunar_calendar-MIT.txt\n'
-                '- 고양이 스티커 그림: 사용자가 제공한 스티커 시트 (개인 사용)\n')
+                '- 아늑단 이미지: 사용자가 제공한 스티커 시트 (개인 사용)\n')
     n, missing = check_deps(out)
     log(f'의존 DLL 점검: 실행 파일·라이브러리 {n}개', '— 빠진 것 없음' if not missing else f'— 빠진 DLL {missing}')
     if missing:

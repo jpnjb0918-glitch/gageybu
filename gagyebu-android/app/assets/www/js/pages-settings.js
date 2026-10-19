@@ -251,7 +251,7 @@ Pages.settings = (() => {
     return `<div class="small" style="line-height:1.7">우리집 가계부 (안드로이드판) ${U.esc(info.version || '')}<br>
       자료 파일 크기: ${info.dbSize ? Math.round(info.dbSize / 1024) + 'KB' : '-'}<br>
       <span class="muted">글꼴: 갈무리(Galmuri) — SIL Open Font License 1.1 · 음력 계산: korean-lunar-calendar — MIT License<br>
-      고양이 스티커: 사용자가 제공한 스티커 시트에서 오려 낸 그림 (개인 사용)</span></div>`;
+      아늑단 이미지: 사용자가 제공한 스티커 시트에서 오려 낸 그림 (개인 사용)</span></div>`;
   }
   return { title: '설정', sticker: 'b08', sub: '내 맘대로 꾸미기', render, tab: 'more' };
 })();

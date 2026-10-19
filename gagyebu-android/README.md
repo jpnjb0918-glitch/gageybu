@@ -20,7 +20,7 @@ PC판 `gagyebu-linux`(파이썬·PyQt6)와 같은 SQLite 자료 파일을 쓰는
 | `app/assets/www/js/pages-*.js` | 화면들 |
 | `app/assets/www/js/lib/korean-lunar-calendar.js` | 음력 계산 (MIT, PC판과 같은 저자·자료) |
 | `app/assets/www/fonts/` | 갈무리11 글꼴 (OFL, 한글·영문만 남기고 줄인 woff2) |
-| `app/assets/www/img/stickers/` | 고양이 스티커 (PC판과 같음) |
+| `app/assets/www/img/stickers/` | 아늑단 이미지 (PC판과 같음) |
 | `build-apk.sh` | APK 만들기 (Gradle 없이) |
 | `packaging/gagyebu-release.jks`, `keystore-password.txt` | 서명 키 — **업데이트하려면 꼭 보관**. git 저장소에는 올리지 않음(`.gitignore`) |
 | `devtools/` | 시험 도구 (APK에는 안 들어감) |

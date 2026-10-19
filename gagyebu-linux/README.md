@@ -63,7 +63,7 @@ Wine·마이크로소프트 구성요소가 필요 없고, 윈도우에서 쓰�
 
 ## 3. 화면 꾸미기 — 미니홈피 테마 (1.1.0부터 기본)
 
-고양이 스티커 시트를 바탕으로 2000년대 미니홈피 느낌으로 꾸민 화면입니다. **설정 → 화면 꾸미기**에서 바로 바꿀 수 있습니다.
+아늑단 이미지를 바탕으로 2000년대 미니홈피 느낌으로 꾸민 화면입니다. **설정 → 화면 꾸미기**에서 바로 바꿀 수 있습니다.
 
 | 부분 | 내용 |
 |---|---|
@@ -262,4 +262,4 @@ packaging/build-packages.sh dist                                 # .deb + .rpm (
 
 - 음력 변환: [korean_lunar_calendar](https://github.com/usingsky/korean_lunar_calendar_py) (MIT, `gagyebu/vendor/`에 라이선스 포함)
 - 도트 글꼴: [갈무리 Galmuri](https://github.com/quiple/galmuri) 2.40.3 (SIL OFL 1.1, `gagyebu/assets/fonts/OFL-Galmuri.txt`)
-- 스티커·아이콘 그림: 사용자가 제공한 고양이 스티커 시트 (`gagyebu/assets/stickers/stickers.json` 에 시트별 출처 표기)
+- 스티커·아이콘 그림: 아늑단 이미지 — 사용자가 제공한 스티커 시트 (`gagyebu/assets/stickers/stickers.json` 에 시트별 출처 표기)

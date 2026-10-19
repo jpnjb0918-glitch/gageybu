@@ -568,7 +568,7 @@ class ThemeTab(QWidget):
                        QLabel('나머지 색(테두리·흐린 글자 등)은 고른 색에 맞춰 자동으로 바뀝니다.'), 'stretch'), 3, 0, 1, 6)
         self.note = QLabel()
         self.note.setWordWrap(True)
-        credit = QLabel('스티커 그림: 사용자가 넣어 준 고양이 스티커 시트에서 오려 낸 것 (assets/stickers)\n'
+        credit = QLabel('아늑단 이미지: 사용자가 넣어 준 스티커 시트에서 오려 낸 것 (assets/stickers)\n'
                         '도트 글꼴: 갈무리(Galmuri) — SIL Open Font License 1.1 (assets/fonts/OFL-Galmuri.txt)')
         credit.setStyleSheet('color:#777')
         lay = QVBoxLayout(self)

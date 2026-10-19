@@ -775,6 +775,32 @@ def avatar_pixmap(sid, size, theme=None, dpr=None):
     return pm
 
 
+FONT_PX_MIN, FONT_PX_MAX = 8, 28
+
+
+def font_px():
+    """글자 크기를 1px 단위로 정했으면 그 값, 아니면 0 (테마의 기본 크기)"""
+    try:
+        v = int(settings().value('font_px', 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return v if FONT_PX_MIN <= v <= FONT_PX_MAX else 0
+
+
+def _with_px(f):
+    """글자 크기를 1px 단위로 정했으면 그 크기로 (스타일시트보다 먼저 정해야 화면에 적용됨)"""
+    px = font_px()
+    if not px:
+        return f
+    f = QFont(f)
+    f.setPixelSize(px)
+    return f
+
+
+def set_font_px(px):
+    set_pref('font_px', int(px) if px and FONT_PX_MIN <= int(px) <= FONT_PX_MAX else 0)
+
+
 def current():
     """지금 적용할 (테마, 도트글꼴 사용 여부)"""
     theme = pref('theme')
@@ -801,9 +827,9 @@ def apply(app=None):
             f = QFont(PIXEL_FAMILY)
             f.setPixelSize(12)
             f.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
-            app.setFont(f)
+            app.setFont(_with_px(f))
         else:
-            app.setFont(font0)
+            app.setFont(_with_px(font0))
         app.setStyleSheet(retro_qss(pixel))
     elif theme in SNS_THEMES:
         c = sns_colors(theme)
@@ -811,7 +837,7 @@ def apply(app=None):
         if fusion is not None:
             app.setStyle(fusion)
         app.setPalette(sns_palette(c))
-        app.setFont(font0)
+        app.setFont(_with_px(font0))
         tag = 'light' if c['dark'] else 'grey'
         app.setStyleSheet(SNS_QSS % dict(c, check=_url('check-white.png'), chev_down=_url(f'chev-down-{tag}.png'),
                                          chev_up=_url(f'chev-up-{tag}.png')))
@@ -820,7 +846,7 @@ def apply(app=None):
         if st is not None:
             app.setStyle(st)
         app.setPalette(_basic_palette(pal0))
-        app.setFont(font0)
+        app.setFont(_with_px(font0))
         app.setStyleSheet(BASIC_QSS)
     _pix_cache.clear()
     from .ui import widgets as _w          # 표의 수입·지출 글자색, 소계 배경색

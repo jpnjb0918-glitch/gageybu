@@ -52,7 +52,9 @@
     const SQL = await window.initSqlJs({ locateFile: f => BASE + f });
     let db = window.__initialDbBytes ? new SQL.Database(window.__initialDbBytes) : new SQL.Database();
     db.run('PRAGMA foreign_keys = ON');
-    window.__getDbBytes = () => Array.from(db.export());
+    // sql.js 의 export() 는 DB 를 닫았다 다시 열어 PRAGMA 가 꺼짐 → 다시 켬 (실제 앱은 Java 에서 항상 켜 둠)
+    const dump = () => { const b = db.export(); db.run('PRAGMA foreign_keys = ON'); return b; };
+    window.__getDbBytes = () => Array.from(dump());
     const ok = o => JSON.stringify(Object.assign({ ok: true }, o || {}));
     const err = e => JSON.stringify({ ok: false, error: String(e && e.message || e) });
     const later = (cb, res) => setTimeout(() => window.__nativeDone(cb, res), 10);
@@ -90,7 +92,7 @@
       getPrefs() { return JSON.stringify(st.prefs); },
       setPref(k, v) { if (v === null) delete st.prefs[k]; else st.prefs[k] = v; },
       setBars(color, light) { st.bars = [color, light]; },
-      appInfo() { return ok({ version: st.appVersion || 'dev', versionCode: 0, sdk: 0, dbPath: 'memory', dbSize: db.export().length }); },
+      appInfo() { return ok({ version: st.appVersion || 'dev', versionCode: 0, sdk: 0, dbPath: 'memory', dbSize: dump().length }); },
       // 새 버전: 시험이 st.releases(배열 또는 'fail')·st.dlResult 를 정해 둠. 받은 파일·설치 화면 열기는 기록만
       fetchReleases(cb) {
         st.updCalls = (st.updCalls || 0) + 1;
@@ -114,7 +116,7 @@
       restoreBackup() { return err('시험 환경에는 보관본이 없습니다'); },
       openExternal(u) { st.external.push(u); },
       exitApp() { st.exited = true; },
-      exportDb(name, cb) { st.exported = { name, bytes: Array.from(db.export()) }; later(cb, { ok: true, size: st.exported.bytes.length }); },
+      exportDb(name, cb) { st.exported = { name, bytes: Array.from(dump()) }; later(cb, { ok: true, size: st.exported.bytes.length }); },
       importDb(cb) {
         const b = window.__importBytes;
         if (!b) { later(cb, { ok: false, cancel: true }); return; }

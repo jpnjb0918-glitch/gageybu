@@ -68,6 +68,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db_path = db_path
         self.con = db.ConProxy(db.connect(db_path))
+        L.ensure_default_ledgers(self.con)            # 생활비·용돈·비상금·여행 장부 (자료 파일마다 한 번만)
         self.lid = L.first_ledger_id(self.con)
         self.setWindowTitle(f'우리집 가계부 ({EDITION} {__version__})')
         self.setWindowIcon(QIcon(TH.ICON))
@@ -195,7 +196,7 @@ class MainWindow(QMainWindow):
         self.body.removeWidget(self.navwrap)
         if retro:
             self.body.addWidget(self.navwrap)
-            self.nav.setFixedWidth(92)
+            self.nav.setFixedWidth(self._nav_width(92, 26))
             self.nav_lay.setContentsMargins(0, 26, 0, 0)
             self.nav_lay.setStretch(0, 0)
             self.nav_lay.setStretch(1, 1)
@@ -207,7 +208,7 @@ class MainWindow(QMainWindow):
             self.main_lay.setSpacing(6)
         else:
             self.body.insertWidget(0, self.navwrap)
-            self.nav.setFixedWidth(170 if sns else 150)
+            self.nav.setFixedWidth(self._nav_width(170 if sns else 150, 40))
             self.nav.setMinimumHeight(0)
             self.nav.setMaximumHeight(16777215)
             self.nav_lay.setContentsMargins(0, 0, 9, 0)
@@ -224,6 +225,12 @@ class MainWindow(QMainWindow):
         self.backdrop.update()
         if refresh:
             self.data_changed()
+
+    def _nav_width(self, base, pad):
+        """메뉴 폭: 기본 폭, 글자를 크게 하면 가장 긴 메뉴 이름이 다 보이게 넓힘"""
+        self.nav.ensurePolished()
+        fm = self.nav.fontMetrics()
+        return max(base, max(fm.horizontalAdvance(p.title) for p in self.pages) + pad)
 
     def apply_nav_order(self, select=True):
         """설정의 메뉴 순서대로 왼쪽(오른쪽) 메뉴를 다시 채움. 첫 줄이 처음 화면."""
@@ -264,13 +271,49 @@ class MainWindow(QMainWindow):
         return bal
 
     # ── 장부 ──
+    NEW_LEDGER, MANAGE_LEDGERS = '__new', '__manage'
+
     def reload_ledgers(self):
+        self.ledger_combo.blockSignals(True)
         self.ledger_combo.clear()
         for r in L.ledgers(self.con):
             self.ledger_combo.addItem(r['name'], r['id'])
+        self.ledger_combo.insertSeparator(self.ledger_combo.count())
+        self.ledger_combo.addItem('＋ 새 장부 만들기…', self.NEW_LEDGER)      # 목록에서 바로 새 장부
+        self.ledger_combo.addItem('장부 관리…', self.MANAGE_LEDGERS)
         if self.ledger_combo.findData(self.lid) < 0:
             self.lid = L.first_ledger_id(self.con)
         self.ledger_combo.setCurrentIndex(max(0, self.ledger_combo.findData(self.lid)))
+        self.ledger_combo.blockSignals(False)
+
+    def new_ledger(self):
+        """새 장부: 이름과 만드는 방법(빈 장부 / 지금 장부의 계정과목만 / 통째로 복사) → 만들고 그 장부로"""
+        from .ui.widgets import FormDialog, run_dialog
+        cur = self.ledger_name().replace('|', '/')       # 고르기 칸 구분자와 겹치지 않게
+        how = ['빈 장부 (대분류 수입만)', f'지금 장부({cur})의 계정과목만 복사', '지금 장부를 통째로 복사']
+        dlg = FormDialog(self, '새 장부', [('name', '장부 이름', 'text*'), ('how', '만드는 방법', 'choice:' + '|'.join(how))],
+                         {'how': 1})
+        if run_dialog(dlg) != QDialog.DialogCode.Accepted:
+            return None
+        v = dlg.values()
+        name = str(v.get('name') or '').strip()
+        if not name:
+            return None
+        i = how.index(v['how']) if v.get('how') in how else 1
+        lid = L.add_ledger(self.con, name, copy_from=None if i == 0 else self.lid, codes_only=(i == 1))
+        self.lid = lid
+        self.reload_ledgers()
+        self.reset_edit_state()
+        self.data_changed()
+        self.statusBar().showMessage(f"새 장부 '{name}'을(를) 만들었습니다.", 5000)
+        return lid
+
+    def manage_ledgers(self):
+        sp = self.goto('SettingsPage')
+        from .ui.settings_page import LedgerTab
+        for p in sp.parts:
+            if isinstance(p, LedgerTab):
+                sp.tabs.setCurrentWidget(p)
 
     def ledger_name(self):
         return self.ledger_combo.currentText()
@@ -283,6 +326,10 @@ class MainWindow(QMainWindow):
 
     def _ledger_selected(self, _i):
         lid = self.ledger_combo.currentData()
+        if lid in (self.NEW_LEDGER, self.MANAGE_LEDGERS):
+            self.ledger_combo.setCurrentIndex(max(0, self.ledger_combo.findData(self.lid)))   # 고른 칸은 지금 장부로 되돌림
+            self.new_ledger() if lid == self.NEW_LEDGER else self.manage_ledgers()
+            return
         if lid and lid != self.lid:
             self.lid = lid
             self.reset_edit_state()
@@ -321,6 +368,7 @@ class MainWindow(QMainWindow):
             B.swap_in(self.db_path, tmp)
         finally:
             self.con.swap(db.connect(self.db_path))           # 성공·실패 모두 다시 연결
+        L.ensure_default_ledgers(self.con)
         self.reset_edit_state()
         self.lid = L.first_ledger_id(self.con)
         self.reload_ledgers()

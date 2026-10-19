@@ -461,3 +461,8 @@ body.sns.dark .empty img, body.sns.dark .tile img, body.sns.dark .stickers img {
 .upbar { height: 10px; border-radius: 5px; background: var(--surface-2, #EEE); border: 1px solid var(--line); overflow: hidden; margin: 12px 0 6px; }
 .upbar i { display: block; height: 100%; width: 0; background: var(--accent, var(--cyan)); transition: width .3s; }
 .upd-notes { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2, var(--mint-row)); line-height: 1.6; }
+
+/* 글자 크기 (1px 단위) */
+.fsz { display: flex; align-items: center; gap: 6px; }
+.fsz input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent, var(--teal)); }
+.fsz .btn { min-width: 40px; }

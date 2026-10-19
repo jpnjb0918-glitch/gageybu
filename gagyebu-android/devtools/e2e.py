@@ -296,7 +296,12 @@ print(len(con.execute('SELECT * FROM entry').fetchall()), A.summary(con)['카드
     pg2.locator('.dialog button', has_text='파일 고르기').click()
     pg2.wait_for_timeout(800)
     names = [x['name'] for x in q(pg2, 'SELECT name FROM ledger ORDER BY id')]
-    check('PC판 자료로 바뀜 (장부 2개)', names == ['가계부 장부', '비상금 장부'], str(names))
+    import sqlite3
+    _c = sqlite3.connect(pyfile)
+    py_names = [r[0] for r in _c.execute('SELECT name FROM ledger ORDER BY id')]
+    _c.close()
+    # PC판 표본: 가계부·비상금 장부 + 기본 장부(생활비·용돈·여행, 비상금은 이미 있어 건너뜀)
+    check('PC판 자료로 바뀜 (PC 장부 그대로)', names == py_names and py_names[:2] == ['가계부 장부', '비상금 장부'], f'{names} / {py_names}')
     shot(pg2, '21-after-import')
     check('가져온 뒤 알림', '가져왔습니다' in ' '.join(pg2.locator('.dialog .msg').all_inner_texts()))
     pg2.evaluate("window.__importBytes = new Uint8Array([1,2,3,4])")
@@ -306,7 +311,7 @@ print(len(con.execute('SELECT * FROM entry').fetchall()), A.summary(con)['카드
     pg2.locator('.dialog button', has_text='파일 고르기').click()
     pg2.wait_for_timeout(500)
     msg = pg2.inner_text('.dialog .msg') if pg2.locator('.dialog').count() else ''
-    check('엉뚱한 파일은 거부하고 지금 자료 유지', '지금 자료는 그대로' in msg and len(q(pg2, 'SELECT * FROM ledger')) == 2, msg)
+    check('엉뚱한 파일은 거부하고 지금 자료 유지', '지금 자료는 그대로' in msg and len(q(pg2, 'SELECT * FROM ledger')) == len(py_names), msg)
     print('■ 자료 파일이 망가졌을 때')
     pg3 = new_page(br, b'not a sqlite file at all' * 50)
     check('되살리기 화면 (PC 백업 가져오기 버튼)', pg3.locator('[data-imp]').count() == 1)

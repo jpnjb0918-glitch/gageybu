@@ -112,6 +112,19 @@ const App = (() => {
   //   feed, timeline = 미니홈피 색 · feed_light, timeline_light = 흰 바탕 · feed_dark, timeline_dark = 검은 바탕 (PC판 theme.py 와 같은 이름)
   const THEMES = ['retro', 'basic', 'feed', 'feed_light', 'feed_dark', 'timeline', 'timeline_light', 'timeline_dark'];
   const theme = () => (THEMES.includes(pref('theme')) ? pref('theme') : 'retro');
+  // 글자 크기: 1px 단위 (fontpx). 정하지 않았으면 예전 4단계(fontsize) 값 그대로
+  const FS_MIN = 10, FS_MAX = 26;
+  function fontPx() {
+    const v = parseInt(pref('fontpx'), 10);
+    if (v >= FS_MIN && v <= FS_MAX) return v;
+    const sys = isSns() || pref('font') === 'system';
+    return SIZES[sys ? 'system' : 'pixel'][pref('fontsize')] || (sys ? 15 : 14);
+  }
+  /** px 로 정하기 (null 이면 기본 크기로) */
+  function setFontPx(px) {
+    if (px === null) { setPref('fontpx', null); setPref('fontsize', null); } else setPref('fontpx', Math.max(FS_MIN, Math.min(FS_MAX, Math.round(px))));
+    applyTheme();
+  }
   const layoutOf = t => (/^feed/.test(t || '') ? 'feed' : /^timeline/.test(t || '') ? 'timeline' : null);
   const variantOf = t => (!layoutOf(t) ? null : /_light$/.test(t) ? 'light' : /_dark$/.test(t) ? 'dark' : 'mh');
   const isSns = () => !!layoutOf(theme());
@@ -126,8 +139,7 @@ const App = (() => {
     cl.toggle('mh', variantOf(t) === 'mh');
     const sys = sns || pref('font') === 'system';        // SNS 테마는 휴대폰 기본 글꼴
     cl.toggle('sysfont', sys);
-    const sz = SIZES[sys ? 'system' : 'pixel'][pref('fontsize')] || 14;
-    document.body.style.setProperty('--fs', sz + 'px');
+    document.body.style.setProperty('--fs', fontPx() + 'px');
     const title = document.querySelector('.hompy-title');
     if (title) title.textContent = t === 'retro' ? '☆ 우리집 가계부 ☆' : '우리집 가계부';
     const c = applyColors(t);
@@ -166,7 +178,15 @@ const App = (() => {
     };
     drawNav();
     ui.back.onclick = () => back();
-    ui.ledger.onchange = () => selectLedger(Number(ui.ledger.value));
+    ui.ledger.onchange = () => {
+      const v = ui.ledger.value;
+      if (v === '__new' || v === '__manage') {          // 목록 끝: 새 장부 만들기 / 장부 관리
+        ui.ledger.value = String(st.lid);
+        if (v === '__new') Pages.settings.newLedger(); else Pages.settings.ledgerSheet();
+        return;
+      }
+      selectLedger(Number(v));
+    };
     UI.$('.minimi').onclick = () => go('settings', { section: 'deco' });
   }
 
@@ -195,7 +215,8 @@ const App = (() => {
   function reloadLedgers() {
     const ls = L.ledgers();
     if (!ls.some(l => l.id === st.lid)) st.lid = L.firstLedgerId();
-    ui.ledger.innerHTML = ls.map(l => `<option value="${l.id}"${l.id === st.lid ? ' selected' : ''}>${U.esc(l.name)}</option>`).join('');
+    ui.ledger.innerHTML = ls.map(l => `<option value="${l.id}"${l.id === st.lid ? ' selected' : ''}>${U.esc(l.name)}</option>`).join('') +
+      '<option disabled>──────────</option><option value="__new">＋ 새 장부 만들기</option><option value="__manage">장부 관리…</option>';
   }
   const ledgerName = () => { const l = L.ledgers().find(x => x.id === st.lid); return l ? l.name : ''; };
 
@@ -339,6 +360,7 @@ const App = (() => {
     let info = {};
     try { info = JSON.parse(N.appInfo()); } catch (_) { /* 없음 */ }
     try { N.autoBackup(7); } catch (_) { /* 보관 실패는 무시 */ }
+    try { L.ensureDefaultLedgers(); } catch (_) { /* 장부 추가 실패는 무시 (자료는 그대로) */ }
     const pw = DB.getMeta('password');
     if (pw) await login(pw);
     start();
@@ -503,6 +525,7 @@ const App = (() => {
   /** 백업 파일로 자료를 통째로 바꾼 뒤 (DB 다시 열고 처음 화면으로) */
   function afterReplace() {
     DB.open(N);
+    try { L.ensureDefaultLedgers(); } catch (_) { /* 무시 */ }
     st.lid = L.firstLedgerId();
     reloadLedgers();
     go('ledger');
@@ -522,7 +545,7 @@ const App = (() => {
   }
 
   return {
-    MOODS, NAV, LAYOUT, st, pref, layoutOf, variantOf, checkUpdate, downloadUpdate, askInstall, updState, setUpdAuto, onUpd, setPref, prefJson, applyTheme, theme, isSns, go, back, navOrder, moreKeys, navLabel,
+    MOODS, NAV, LAYOUT, st, pref, layoutOf, variantOf, fontPx, setFontPx, FS_MIN, FS_MAX, checkUpdate, downloadUpdate, askInstall, updState, setUpdAuto, onUpd, setPref, prefJson, applyTheme, theme, isSns, go, back, navOrder, moreKeys, navLabel,
     ledgerLayout, drawNav, navReorderSheet, layoutReorderSheet, COLOR_KEYS, baseColors, customColors, setCustomColor, render, dataChanged, fab, onBack, boot, reloadLedgers,
     updateHeader, selectLedger, afterReplace, nativeAsync, checkRecurring, ledgerName,
     get lid() { return st.lid; },

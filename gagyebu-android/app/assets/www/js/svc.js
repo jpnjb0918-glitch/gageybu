@@ -112,6 +112,18 @@ const L = (() => {
     });
   }
 
+  /** 기본 장부(생활비·용돈·비상금·여행)를 자료 파일마다 한 번만 — PC판 ledger.ensure_default_ledgers 와 같은 규칙
+      (계정과목은 첫 장부에서 복사, 같은 이름 있으면 건너뜀, meta default_ledgers 로 표시 → 지운 장부는 다시 안 생김) */
+  const DEFAULT_EXTRA_LEDGERS = ['생활비 장부', '용돈 장부', '비상금 장부', '여행 장부'];
+  function ensureDefaultLedgers() {
+    if (DB.getMeta('default_ledgers')) return [];
+    const first = firstLedgerId();
+    if (first === null) return [];
+    const have = new Set(ledgers().map(l => l.name));
+    const added = DEFAULT_EXTRA_LEDGERS.filter(n => !have.has(n)).map(n => addLedger(n, first, true));
+    DB.setMeta('default_ledgers', '1');
+    return added;
+  }
   const renameLedger = (lid, name) => DB.run('UPDATE ledger SET name=? WHERE id=?', [name, lid]);
   function firstLedgerId() { const r = DB.one('SELECT id FROM ledger ORDER BY sort, id LIMIT 1'); return r ? r.id : null; }
   function deleteLedger(lid) {
@@ -289,7 +301,7 @@ const L = (() => {
   /** 보고서용: 수입 계정은 수입-지출, 지출 계정은 지출-수입 */
   const signedAmount = (code, income, expense) => (U.isIncomeCode(code) ? income - expense : expense - income);
 
-  return { ledgers, addLedger, renameLedger, firstLedgerId, deleteLedger, resetLedger, groups, categories,
+  return { ledgers, addLedger, ensureDefaultLedgers, DEFAULT_EXTRA_LEDGERS, renameLedger, firstLedgerId, deleteLedger, resetLedger, groups, categories,
     categoryMap, groupMap, setGroup, deleteGroup, setCategory, moveCategoryOrder, mergeCategory, categoryUsage,
     deleteCategory, addEntry, updateEntry, deleteEntries, getEntry, balanceBefore, entriesWithBalance, totals,
     currentBalance, AMOUNT_OPS, search, itemWords, setItemWord, deleteItemWord, lastCodeForItem, codeLabel, signedAmount };

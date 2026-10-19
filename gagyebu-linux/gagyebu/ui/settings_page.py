@@ -542,6 +542,12 @@ class ThemeTab(QWidget):
         fl = QFormLayout(box)
         fl.addRow('테마', self.theme)
         fl.addRow('글꼴', self.font)
+        self.fsize = QSpinBox()
+        self.fsize.setRange(T.FONT_PX_MIN, T.FONT_PX_MAX)
+        self.fsize.setSuffix(' px')
+        self.fsize.setToolTip('1픽셀씩 조절합니다. 바꾸면 바로 적용됩니다.')
+        self.fsize_note = QLabel()
+        fl.addRow('글자 크기', h(self.fsize, button('기본 크기', self._font_default), self.fsize_note, 'stretch'))
         fl.addRow('', self.marquee)
         fl.addRow('미니미', h(self.minimi, button('바꾸기…', self.pick), 'stretch'))
         # 순서 (이 PC에만 저장)
@@ -582,6 +588,7 @@ class ThemeTab(QWidget):
         self.side.currentIndexChanged.connect(self._side_changed)
         self.theme.currentIndexChanged.connect(self._changed)
         self.font.currentIndexChanged.connect(self._changed)
+        self.fsize.valueChanged.connect(self._font_px)
         self.marquee.toggled.connect(self._changed)
 
     # ── 순서 ──
@@ -638,13 +645,17 @@ class ThemeTab(QWidget):
 
     def refresh(self):
         T = self.T
-        for w in (self.theme, self.font, self.marquee, self.side):
+        for w in (self.theme, self.font, self.marquee, self.side, self.fsize):
             w.blockSignals(True)
+        f = QApplication.font()
+        cur = f.pixelSize() if f.pixelSize() > 0 else round(f.pointSizeF() * self.logicalDpiY() / 72)
+        self.fsize.setValue(T.font_px() or cur)
+        self.fsize_note.setText('' if T.font_px() else '(지금은 테마 기본 크기)')
         self.side.setCurrentIndex(max(0, self.side.findData(T.input_side())))
         self.theme.setCurrentIndex(max(0, self.theme.findData(T.pref('theme'))))
         self.font.setCurrentIndex(max(0, self.font.findData(T.pref('font'))))
         self.marquee.setChecked(T.pref('marquee'))
-        for w in (self.theme, self.font, self.marquee, self.side):
+        for w in (self.theme, self.font, self.marquee, self.side, self.fsize):
             w.blockSignals(False)
         self._draw_colors()
         retro = T.pref('theme') == 'retro'
@@ -662,6 +673,16 @@ class ThemeTab(QWidget):
         T.set_pref('theme', self.theme.currentData())
         T.set_pref('font', self.font.currentData())
         T.set_pref('marquee', self.marquee.isChecked())
+        self.page.app.apply_theme()
+        self.refresh()
+
+    def _font_px(self, v):
+        self.T.set_font_px(v)
+        self.page.app.apply_theme()
+        self.refresh()
+
+    def _font_default(self):
+        self.T.set_font_px(0)
         self.page.app.apply_theme()
         self.refresh()
 

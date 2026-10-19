@@ -1,4 +1,5 @@
 """장부·계정과목·수입/지출 내역."""
+from .. import db
 from ..util import CODE_CHARS, iso, is_income_code
 
 
@@ -31,6 +32,26 @@ def add_ledger(con, name, copy_from=None, codes_only=False):
         con.execute("INSERT INTO cat_group VALUES(?, '0', '수입')", (lid,))
     con.commit()
     return lid
+
+
+DEFAULT_EXTRA_LEDGERS = ('생활비 장부', '용돈 장부', '비상금 장부', '여행 장부')
+
+
+def ensure_default_ledgers(con):
+    """기본 장부(생활비·용돈·비상금·여행)를 자료 파일마다 한 번만 더함 (안드로이드판 L.ensureDefaultLedgers 와 같은 규칙).
+    - 계정과목은 첫 장부에서 복사, 같은 이름의 장부가 이미 있으면 건너뜀
+    - meta 'default_ledgers' 에 표시해 두므로 지운 장부는 다시 생기지 않음 (PC·휴대폰 어느 쪽이 먼저 열어도 한 번만)
+    더한 장부 id 목록을 돌려줌"""
+    if db.get_meta(con, 'default_ledgers'):
+        return []
+    first = first_ledger_id(con)
+    if first is None:
+        return []
+    have = {r['name'] for r in ledgers(con)}
+    added = [add_ledger(con, n, copy_from=first, codes_only=True) for n in DEFAULT_EXTRA_LEDGERS if n not in have]
+    db.set_meta(con, 'default_ledgers', '1')
+    con.commit()
+    return added
 
 
 def rename_ledger(con, lid, name):

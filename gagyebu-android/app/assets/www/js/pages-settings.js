@@ -195,7 +195,10 @@ Pages.settings = (() => {
     return `<div class="form">
       <div class="f"><label class="l">테마</label><select data-p="theme"><option value="retro">미니홈피 (2000년대 감성)</option><option value="basic">기본 (깔끔하게)</option><option value="feed">피드 · 미니홈피 색 (사진 SNS 느낌)</option><option value="feed_light">피드 · 밝게</option><option value="feed_dark">피드 · 어둡게</option><option value="timeline">타임라인 · 미니홈피 색 (짧은 글 SNS 느낌)</option><option value="timeline_light">타임라인 · 밝게</option><option value="timeline_dark">타임라인 · 어둡게</option></select><div class="hint">피드·타임라인 테마는 휴대폰 기본 글꼴을 쓰고, 가계부 목록이 피드·타임라인 모양으로 바뀝니다. 기능은 같습니다. 색은 미니홈피 색·밝게·어둡게 중에서 고릅니다.</div></div>
       <div class="f"><label class="l">글꼴</label><select data-p="font"><option value="pixel">도트 글꼴 (갈무리)</option><option value="system">휴대폰 기본 글꼴</option></select></div>
-      <div class="f"><label class="l">글자 크기</label><select data-p="fontsize"><option value="s">작게</option><option value="m">보통</option><option value="l">크게</option><option value="xl">아주 크게</option></select></div>
+      <div class="f"><label class="l">글자 크기 <b class="fs-v"></b></label>
+        <div class="fsz"><button class="btn sm" data-fs="-1" aria-label="1픽셀 작게">－</button><input type="range" min="${App.FS_MIN}" max="${App.FS_MAX}" step="1" data-fsr aria-label="글자 크기">
+        <button class="btn sm" data-fs="1" aria-label="1픽셀 크게">＋</button><button class="btn sm" data-fs="0">기본</button></div>
+        <div class="hint">1픽셀씩 조절합니다 (${App.FS_MIN}~${App.FS_MAX}px). 바꾸면 바로 보입니다.</div></div>
       <div class="f"><label class="l">순서</label><div class="row wrap"><button class="btn sm" data-ord="nav">메뉴 순서</button><button class="btn sm" data-ord="layout">가계부 화면 구성</button></div>
         <div class="hint">메뉴: 위 4개가 아래 탭, 나머지는 더보기 화면 · 계정과목 순서는 장부·계정 → 계정과목에서</div></div>
       <div class="f"><label class="l">이 테마의 색</label><div class="colors"></div>
@@ -217,6 +220,17 @@ Pages.settings = (() => {
         if (k === 'theme') drawColors(c);
       });
     });
+    // 글자 크기 (1px 단위)
+    const fsr = UI.$('[data-fsr]', c), fsv = UI.$('.fs-v', c);
+    const showFs = () => { fsr.value = App.fontPx(); fsv.textContent = App.fontPx() + 'px'; };
+    showFs();
+    fsr.addEventListener('input', () => { App.setFontPx(Number(fsr.value)); App.updateHeader(); showFs(); });
+    UI.$$('[data-fs]', c).forEach(b => b.addEventListener('click', () => {
+      const d = Number(b.dataset.fs);
+      App.setFontPx(d === 0 ? null : App.fontPx() + d);
+      App.updateHeader();
+      showFs();
+    }));
     UI.$('[data-ord="nav"]', c).onclick = () => App.navReorderSheet();
     UI.$('[data-ord="layout"]', c).onclick = () => App.layoutReorderSheet();
     UI.$('[data-creset]', c).onclick = () => {
@@ -278,7 +292,7 @@ Pages.settings = (() => {
       <span class="muted">글꼴: 갈무리(Galmuri) — SIL Open Font License 1.1 · 음력 계산: korean-lunar-calendar — MIT License<br>
       아늑단 이미지: 사용자가 제공한 스티커 시트에서 오려 낸 그림 (개인 사용)</span></div>`;
   }
-  return { title: '설정', sticker: 'b08', sub: '내 맘대로 꾸미기', render, tab: 'more' };
+  return { title: '설정', sticker: 'b08', sub: '내 맘대로 꾸미기', render, tab: 'more', newLedger, ledgerSheet };
 })();
 
 // ════════ 계정과목 편집 ════════

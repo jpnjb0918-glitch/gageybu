@@ -115,6 +115,7 @@ def build(path):
     db.set_meta(con, 'settle_day', 25)
     db.set_meta(con, 'password', util.hash_password('1111'))
     con.commit()
+    L.ensure_default_ledgers(con)        # PC판 프로그램이 열 때처럼 기본 장부 추가 (휴대폰판이 다시 더하지 않는지도 비교됨)
     con.close()
 
 

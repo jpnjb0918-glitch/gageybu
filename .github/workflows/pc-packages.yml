@@ -3,6 +3,7 @@
 #   - main 에 gagyebu-linux/ 변경이 올라올 때 → Actions 화면의 Artifacts 에 파일
 #   - linux-v<버전> 릴리스를 Publish 할 때 → 그 릴리스에 파일을 붙임
 #   - Actions 화면의 Run workflow → 태그를 넣으면 그 릴리스에 다시 붙임, 비우면 빌드만
+#     (build_ref 에 main 을 넣으면 태그의 커밋 대신 main 을 빌드해서 붙임 — 판 번호는 같고 고친 것만 반영할 때)
 # 릴리스 첨부 파일은 이 작업이 관리한다 (붙이기 전에 그 릴리스의 기존 첨부를 지움).
 # GitHub 은 첨부 파일 이름의 한글을 바꿔 버리므로 파일 이름은 영문, 화면 표시 이름(label)은 한글로 붙인다.
 name: PC판 (리눅스·윈도우)
@@ -12,6 +13,10 @@ on:
     inputs:
       tag:
         description: '이미 있는 릴리스에 다시 붙일 태그 (예: linux-v1.1.1). 비우면 빌드만'
+        required: false
+        default: ''
+      build_ref:
+        description: '빌드할 브랜치·커밋 (비우면 태그의 커밋). 판 번호는 그대로 두고 고친 것만 다시 붙일 때 main'
         required: false
         default: ''
   push:
@@ -39,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || '' }}
+          ref: ${{ inputs.build_ref || inputs.tag || '' }}
 
       - name: 태그와 프로그램 버전이 같은지
         if: env.TAG != ''
@@ -72,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || '' }}
+          ref: ${{ inputs.build_ref || inputs.tag || '' }}
 
       - name: 태그와 프로그램 버전이 같은지
         if: env.TAG != ''
@@ -122,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || '' }}
+          ref: ${{ inputs.build_ref || inputs.tag || '' }}
 
       - uses: actions/download-artifact@v7
         with:

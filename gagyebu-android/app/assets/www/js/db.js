@@ -97,6 +97,28 @@ CREATE TABLE IF NOT EXISTS diary(
 CREATE TABLE IF NOT EXISTS memo(
     id INTEGER PRIMARY KEY, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '',
     created TEXT, sort INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS favorite(
+    id INTEGER PRIMARY KEY,
+    ledger_id INTEGER NOT NULL REFERENCES ledger(id) ON DELETE CASCADE,
+    item TEXT NOT NULL DEFAULT '', income INTEGER NOT NULL DEFAULT 0, expense INTEGER NOT NULL DEFAULT 0,
+    code TEXT NOT NULL DEFAULT '', memo TEXT NOT NULL DEFAULT '', sort INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS attachment(
+    id INTEGER PRIMARY KEY,
+    entry_id INTEGER NOT NULL REFERENCES entry(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT '', mime TEXT NOT NULL DEFAULT 'image/jpeg', data BLOB NOT NULL, created TEXT);
+CREATE INDEX IF NOT EXISTS attachment_e ON attachment(entry_id);
+CREATE TABLE IF NOT EXISTS goal(
+    id INTEGER PRIMARY KEY, name TEXT NOT NULL, target INTEGER NOT NULL DEFAULT 0, due TEXT,
+    memo TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0, sort INTEGER NOT NULL DEFAULT 0, created TEXT);
+CREATE TABLE IF NOT EXISTS goal_tx(
+    id INTEGER PRIMARY KEY, goal_id INTEGER NOT NULL REFERENCES goal(id) ON DELETE CASCADE,
+    date TEXT NOT NULL, amount INTEGER NOT NULL, memo TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS debt(
+    id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('lend','borrow')), person TEXT NOT NULL,
+    amount INTEGER NOT NULL, date TEXT NOT NULL, due TEXT, memo TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS debt_pay(
+    id INTEGER PRIMARY KEY, debt_id INTEGER NOT NULL REFERENCES debt(id) ON DELETE CASCADE,
+    date TEXT NOT NULL, amount INTEGER NOT NULL, memo TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS legacy_raw(id INTEGER PRIMARY KEY, source TEXT, tbl TEXT, data TEXT)`;
 
   const DEFAULT_GROUPS = [['0', '수입'], ['1', '공과금'], ['2', '교육비'], ['3', '식비'], ['4', '교통·통신비'],
@@ -166,6 +188,8 @@ CREATE TABLE IF NOT EXISTS legacy_raw(id INTEGER PRIMARY KEY, source TEXT, tbl T
     for (const s of statements(SCHEMA)) run(s);
     const cols = q('PRAGMA table_info(recurring)').map(r => r.name);
     if (!cols.includes('applied_through')) run('ALTER TABLE recurring ADD COLUMN applied_through TEXT');
+    const acols = q('PRAGMA table_info(account_tx)').map(r => r.name);
+    if (!acols.includes('link_id')) run('ALTER TABLE account_tx ADD COLUMN link_id INTEGER');   // 자산 간 이체의 짝 (1.7.0)
     if (getMeta('schema_version') === null) setMeta('schema_version', SCHEMA_VERSION);
     if (!one('SELECT 1 AS x FROM ledger LIMIT 1')) tx(() => seedDefaults(true, true));
   }

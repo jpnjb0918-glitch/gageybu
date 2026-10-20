@@ -47,7 +47,7 @@ MOODS = ['행복 (^-^)', '신남 (^0^)/', '알뜰 (-_-)b', '월급날 ♡(^_^)�
          '텅장 (ㅠ_ㅠ)', '지름신 강림 (>_<)', '피곤 (-_-)zZ']
 
 DEFAULTS = {'theme': 'retro', 'font': 'pixel', 'marquee': True, 'minimi': DEFAULT_MINIMI,
-            'mood': MOODS[0], 'motto': '', 'profile_hidden': False}
+            'mood': MOODS[0], 'motto': '', 'profile_hidden': False, 'budget_card': True}
 
 
 # ── 사용자 설정 ──

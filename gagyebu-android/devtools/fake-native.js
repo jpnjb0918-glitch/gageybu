@@ -43,6 +43,8 @@
     return msg => { const a = new Uint8Array(64 + msg.length); a.set(ipad); a.set(msg, 64); const ih = sha256(a);
       const b = new Uint8Array(96); b.set(opad); b.set(ih, 64); return sha256(b); };
   }
+  // 작은 영수증 모양 JPEG (24x32)
+  const TINY_JPEG = '/9j/4AAQSkZJRgABAQEAZABkAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAgABgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD1id7tXAt4IZFxyZJihz9ApqPzNS/59LX/AMCW/wDjdMvfs3nDzvtu7bx5Hnbcc/3OM/rVf/QP+op/5NVzFl+B7tnIuIIY1xwY5i5z9CooqCy+zecfJ+27tvPn+dtxx/f4z+tFJjJ50u2cG3nhjXHIkhLnP1DCo/L1L/n7tf8AwGb/AOOUy9hgkmBk0n7YduPM2RnHXj5iD/8Arqv9ltP+hb/8hwf/ABVMRfgS7VybieGRccCOEoc/UsaKgsoYI5iY9J+xnbjzNkYz04+Uk/8A6qKTGf/Z';
   const hex = b => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
   const unhex = s => new Uint8Array(s.match(/../g).map(x => parseInt(x, 16)));
 
@@ -136,6 +138,34 @@
       },
       saveText(name, mime, content, cb) { st.saved.push({ name, mime, content }); later(cb, { ok: true }); },
       openText(cb) { const t = window.__openText; later(cb, t === undefined ? { ok: false, cancel: true } : { ok: true, text: t }); },
+      // 1.7.0 사진: 시험이 st.photoB64(JPEG base64)를 정해 두면 그것을, 아니면 아주 작은 사진을 돌려줌
+      pickPhoto(camera, cb) {
+        st.picks = (st.picks || []).concat([camera ? 'camera' : 'album']);
+        if (st.photoCancel) { later(cb, { ok: false, cancel: true, error: '취소' }); return; }
+        const b64 = st.photoB64 || TINY_JPEG;
+        later(cb, { ok: true, b64, name: camera ? '사진.jpg' : 'receipt.jpg', size: atob(b64).length });
+      },
+      addAttachment(eid, b64, name) {
+        try {
+          const bin = atob(b64), data = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
+          const s = db.prepare('INSERT INTO attachment(entry_id,name,mime,data,created) VALUES(?,?,?,?,?)');
+          s.run([eid, name || '', 'image/jpeg', data, '2026-10-20 09:00']); s.free();
+          return ok({ id: db.exec('SELECT last_insert_rowid()')[0].values[0][0] });
+        } catch (e) { return err(e); }
+      },
+      attachmentData(id) {
+        try {
+          const r = db.exec('SELECT data FROM attachment WHERE id=' + Number(id));
+          if (!r.length) return err('사진이 없습니다.');
+          const d = r[0].values[0][0];
+          let bin = '';
+          for (let i = 0; i < d.length; i++) bin += String.fromCharCode(d[i]);
+          return ok({ b64: btoa(bin) });
+        } catch (e) { return err(e); }
+      },
+      widgetRefresh() { st.widget = (st.widget || 0) + 1; },
+      takeLaunchAction() { const l = st.launch || ''; st.launch = null; return l; },
     };
   })();
 })();

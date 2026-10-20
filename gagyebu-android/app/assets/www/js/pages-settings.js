@@ -238,7 +238,8 @@ Pages.settings = (() => {
         <div class="fsz"><button class="btn sm" data-fs="-1" aria-label="1픽셀 작게">－</button><input type="range" min="${App.FS_MIN}" max="${App.FS_MAX}" step="1" data-fsr aria-label="글자 크기">
         <button class="btn sm" data-fs="1" aria-label="1픽셀 크게">＋</button><button class="btn sm" data-fs="0">기본</button></div></div></div>`,
         `도트 글꼴은 미니홈피·기본 테마에서, 고운돋움·주아·개구·서툰이야기(무료 글꼴)는 모든 테마에서 쓰입니다. 글자 크기는 1픽셀씩 (${App.FS_MIN}~${App.FS_MAX}px), 바꾸면 바로 보입니다.`, true)}
-      ${grp('순서', `<div class="row wrap"><button class="btn sm" data-ord="nav">메뉴 순서</button><button class="btn sm" data-ord="layout">가계부 화면 구성</button></div>`,
+      ${grp('순서', `<div class="row wrap"><button class="btn sm" data-ord="nav">메뉴 순서</button><button class="btn sm" data-ord="layout">가계부 화면 구성</button></div>
+        <label class="check" style="margin:8px 0 0"><input type="checkbox" data-p="budget_card"> 가계부 화면에 이달 예산 막대·무지출 보이기</label>`,
         '메뉴: 위 4개가 아래 탭, 나머지는 더보기 화면. 계정과목 순서는 설정 → 계정과목에서.', true)}
       ${grp('이 테마의 색', `<div class="colors"></div><div class="row" style="margin-top:8px"><button class="btn sm" data-creset>이 테마 색 모두 처음으로</button></div>`,
         '고른 색은 이 휴대폰의 지금 테마에만 쓰입니다. 나머지 색(테두리·흐린 글자 등)은 고른 색에 맞춰 바뀝니다.', true)}

@@ -11,6 +11,8 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComboB
 from .. import theme as T
 from ..lunar import lunar_label
 from ..services import calendar_svc as C
+from ..services import insights as INS
+from ..util import month_end
 from .widgets import (CENTER, DateEdit, MonthNav, button, cell, confirm, error, export_csv, fill, h, info, make_table)
 
 SUN = '#d0312d'
@@ -184,7 +186,12 @@ class CalendarPage(QWidget):
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
-        ll.addWidget(h(self.nav, 'stretch', button('오늘', self.today), button('기념일 관리', self.anniv),
+        self.ns_chk = QCheckBox('무지출 날 표시')
+        self.ns_chk.setToolTip('지금 장부에서 지출이 없었던 날(오늘까지)에 표시 — 무지출 챌린지')
+        self.ns_chk.setChecked(str(T.settings().value('cal_no_spend', '1')) not in ('0', 'false'))
+        self.ns_chk.toggled.connect(self._ns_toggled)
+        self.ns_lbl = QLabel()
+        ll.addWidget(h(self.nav, self.ns_lbl, 'stretch', self.ns_chk, button('오늘', self.today), button('기념일 관리', self.anniv),
                        button('이달 일정 CSV', self.export)))
         ll.addWidget(self.grid, 1)
         sp = QSplitter()
@@ -203,6 +210,16 @@ class CalendarPage(QWidget):
         today = dt.date.today()
         tn = T.tone()
         dark = bool((T.sns_colors() or {}).get('dark'))
+        no_spend = set()
+        self.ns_lbl.setText('')
+        if self.ns_chk.isChecked() and dt.date(y, m, 1) <= today:
+            lid = self.app.lid
+            ms, me = dt.date(y, m, 1), min(dt.date(y, m, month_end(y, m)), today)
+            no_spend = set(INS.no_spend_days(self.con, lid, ms, me))
+            if no_spend:
+                streak = INS.no_spend_streak(self.con, lid, today) if me == today else 0
+                self.ns_lbl.setText(f"<span style='color:{tn['ann']}'>무지출 {len(no_spend)}일"
+                                    + (f' · 오늘까지 {streak}일째' if streak >= 2 else '') + '</span>')
         for c, key in ((0, 'sun'), (6, 'sat')):
             self.grid.horizontalHeaderItem(c).setForeground(QColor(tn[key]))
         for w, week in enumerate(weeks):
@@ -213,6 +230,8 @@ class CalendarPage(QWidget):
                     color = tn['faint']
                 parts = [f'<span style="color:{color};font-weight:bold">{d.day}</span> '
                          f'<span style="color:{tn["lunar"]};font-size:8pt">({lunar_label(d)})</span>']
+                if d.isoformat() in no_spend and d.month == m:
+                    parts.append(f'<span style="color:{tn["ann"]};font-size:8pt;font-weight:bold">● 무지출</span>')
                 for title, holi in anns.get(d, []):
                     parts.append(f'<span style="color:{tn["sun"] if holi else tn["ann"]};font-size:9pt">{html.escape(title)}</span>')
                 for s in scheds.get(d.isoformat(), []):
@@ -234,6 +253,10 @@ class CalendarPage(QWidget):
                 self.grid.setItem(w, c, cell(''))
                 self.grid.item(w, c).setData(Qt.ItemDataRole.UserRole, d.isoformat())
         self.show_day()
+
+    def _ns_toggled(self, on):
+        T.set_pref('cal_no_spend', '1' if on else '0')
+        self.refresh()
 
     def show_date(self, d):
         """그 날을 골라 보여 줌 (가계부 게시물의 [달력에서 보기])"""

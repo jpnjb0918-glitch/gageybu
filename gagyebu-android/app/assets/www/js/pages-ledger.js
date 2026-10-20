@@ -23,6 +23,13 @@ const Entry = (() => {
       <div class="f"><label class="l">메모</label><input type="text" data-k="memo" value="${U.esc(v0 ? v0.memo || '' : '')}"></div>
       <div class="small muted" data-both>${mode === 'both' ? '' : '<a href="#" data-showboth>수입·지출 모두 입력하기</a>'}</div>
     </div>`);
+    // 1.7.0: 새 내역이면 위에 [문자로 넣기]·★ 자주 쓰는 내역 칩, 아래에 사진 칸
+    const tools = e ? null : UI.el(`<div class="ent-tools"><div class="row"><button type="button" class="chip" data-sms>${UI.icon('chat')}문자로 넣기</button>
+      <span class="grow"></span><button type="button" class="chip" data-favadd title="지금 입력을 자주 쓰는 내역에 넣기">＋★</button><button type="button" class="chip" data-favman>정리</button></div>
+      <div class="favs"></div></div>`);
+    if (tools) body.insertBefore(tools, body.firstChild);
+    const ph = Extra.photoField(e ? e.id : null);
+    body.insertBefore(ph.el, body.querySelector('[data-both]'));
     UI.bindMoney(body);
     const $ = s => UI.$(s, body);
     const codeSel = $('[data-k=code]');
@@ -73,15 +80,53 @@ const Entry = (() => {
     itemInp.addEventListener('focus', showSuggest);
     itemInp.addEventListener('change', autoCode);
 
+    // ★ 자주 쓰는 내역: 누르면 칸을 한 번에 채움
+    function drawFavs() {
+      if (!tools) return;
+      const fs = L.favorites(lid);
+      const box = UI.$('.favs', tools);
+      box.innerHTML = fs.length ? fs.map(f => `<button type="button" class="chip fav" data-fav="${f.id}">★ ${U.esc(Extra.favLabel(f))}</button>`).join('')
+        : '<span class="tiny muted">자주 넣는 내역은 칸을 채운 뒤 ＋★ 로 넣어 두면 다음부터 한 번에 채워져요</span>';
+      UI.on(box, '[data-fav]', 'click', (ev, b) => useFav(fs.find(f => f.id === Number(b.dataset.fav))));
+    }
+    function useFav(f) {
+      if (!f) return;
+      setMode(f.income && f.expense ? 'both' : f.income ? 'in' : 'out', false);
+      fillCodes(f.code || codeSel.value);
+      if (f.code && UI.$$('option', codeSel).some(o => o.value === f.code)) codeSel.value = f.code;
+      itemInp.value = f.item;
+      $('[data-k=income]').value = f.income ? UI.money(f.income) : '';
+      $('[data-k=expense]').value = f.expense ? UI.money(f.expense) : '';
+      $('[data-k=memo]').value = f.memo || '';
+      sug.innerHTML = '';
+      UI.toast(`'${f.item}' — 날짜·금액을 확인하고 저장하세요`);
+    }
+    if (tools) {
+      drawFavs();
+      UI.$('[data-sms]', tools).onclick = () => Extra.smsSheet('');
+      UI.$('[data-favman]', tools).onclick = () => { Extra.favoritesSheet(); };
+      UI.$('[data-favadd]', tools).onclick = () => {
+        const f = { item: itemInp.value.trim(), code: codeSel.value, memo: $('[data-k=memo]').value.trim(), income: 0, expense: 0 };
+        try {
+          if (mode !== 'out') f.income = U.calcMoney($('[data-k=income]').value);
+          if (mode !== 'in') f.expense = U.calcMoney($('[data-k=expense]').value);
+        } catch (_) { UI.toast('금액은 숫자로 입력하세요'); return; }
+        if (!f.item) { UI.toast('먼저 품목(과 금액·계정)을 입력하세요'); itemInp.focus(); return; }
+        L.saveFavorite(lid, f);
+        drawFavs();
+        UI.toast(`'${f.item}' 을(를) 자주 쓰는 내역에 넣었어요`);
+      };
+    }
+
     function value() {
       const v = {
         date: $('[data-k=date]').value, item: itemInp.value.trim(), code: codeSel.value, memo: $('[data-k=memo]').value.trim(),
         income: 0, expense: 0,
       };
       try {
-        if (mode !== 'out') v.income = U.parseMoney($('[data-k=income]').value);
-        if (mode !== 'in') v.expense = U.parseMoney($('[data-k=expense]').value);
-      } catch (_) { throw new Error('금액은 숫자로 입력하세요.'); }
+        if (mode !== 'out') v.income = U.calcMoney($('[data-k=income]').value);
+        if (mode !== 'in') v.expense = U.calcMoney($('[data-k=expense]').value);
+      } catch (_) { throw new Error('금액은 숫자(또는 12000+3500 같은 계산식)로 입력하세요.'); }
       if (!U.isValidIso(v.date)) throw new Error('날짜를 확인하세요.');
       if (!v.item) throw new Error('품목을 입력하세요.');
       if (!v.income && !v.expense) throw new Error('금액을 입력하세요.');
@@ -91,23 +136,26 @@ const Entry = (() => {
     function save(keepOpen) {
       let v;
       try { v = value(); } catch (err) { UI.toast(err.message); return false; }
+      const before = Extra.spentBefore(lid, v.code, v.date);
       if (e) {
         const cur = L.getEntry(e.id);
         if (!cur || cur.ledger_id !== lid) { UI.alert('이 내역은 지금 장부에 없습니다. 창을 닫고 다시 고르세요.'); return false; }
         L.updateEntry(e.id, v);
       } else {
-        L.addEntry(lid, v);
+        const eid = L.addEntry(lid, v);
+        try { ph.save(eid); } catch (err) { UI.alert('사진을 넣지 못했습니다.\n' + err.message); }
         if (!words.includes(v.item)) words.unshift(v.item);
       }
+      const warn = Extra.alertAfter(lid, v.code, v.date, before);        // 예산 80%·100% 를 처음 넘었으면 알림
       App.dataChanged();
       if (opts.onSaved) opts.onSaved(v);
       if (keepOpen) {
-        UI.toast(`저장했습니다: ${v.item} ${UI.money(v.income || v.expense)}원`);
+        UI.toast(`저장했습니다: ${v.item} ${UI.money(v.income || v.expense)}원` + (warn ? ` · ⚠ ${warn}` : ''), warn ? 4500 : 1900);
         itemInp.value = ''; $('[data-k=income]').value = ''; $('[data-k=expense]').value = ''; $('[data-k=memo]').value = '';
         sug.innerHTML = '';
         return false;
       }
-      UI.toast('저장했습니다');
+      UI.toast(warn ? `⚠ ${warn}` : '저장했습니다', warn ? 4500 : 1900);
       return undefined;
     }
     const buttons = [];
@@ -131,14 +179,17 @@ const Entry = (() => {
     if (!e && !opts.copy) setTimeout(() => $('[data-k=expense]').focus(), 250);
   }
 
-  /** 내역 한 줄 (가계부·검색·달력 공용) */
-  function rowHtml(r, bal, showDate, cmap) {
-    const amt = [r.income ? `<div class="in bold">+${UI.money(r.income)}</div>` : '', r.expense ? `<div class="out bold">-${UI.money(r.expense)}</div>` : ''].join('');
+  /** 금액 글자: 지출은 -1,000 · 수입은 +1,000. 음수 지출(환불·승인 취소)은 +, 음수 수입은 − (예전엔 '--4,500') */
+  const signed = (v, sign) => (v < 0 ? (sign === '-' ? '+' : '-') : sign) + UI.money(Math.abs(v));
+  const cam = (photos, id) => (photos && photos[id] ? `<span class="camk" title="사진 ${photos[id]}장">${UI.icon('camera')}</span>` : '');
+  /** 내역 한 줄 (가계부·검색·달력 공용). photos: {내역 번호: 사진 수} (있으면 사진기 표시) */
+  function rowHtml(r, bal, showDate, cmap, photos) {
+    const amt = [r.income ? `<div class="in bold">${signed(r.income, '+')}</div>` : '', r.expense ? `<div class="out bold">${signed(r.expense, '-')}</div>` : ''].join('');
     const sub = [L.codeLabel(cmap, r.code), r.memo].filter(Boolean).map(U.esc).join(' · ');
-    return `<li class="tap" data-id="${r.id}"><div class="grow"><div class="main-t ellipsis">${showDate ? `<span class="muted small">${U.shortDate(r.date)}</span> ` : ''}${U.esc(r.item)}</div>
+    return `<li class="tap" data-id="${r.id}"><div class="grow"><div class="main-t ellipsis">${showDate ? `<span class="muted small">${U.shortDate(r.date)}</span> ` : ''}${U.esc(r.item)}${cam(photos, r.id)}</div>
       <div class="sub ellipsis">${sub}</div></div><div class="right nowrap">${amt}${bal !== null && bal !== undefined ? `<div class="tiny muted">잔액 ${UI.money(bal)}</div>` : ''}</div></li>`;
   }
-  return { open, rowHtml };
+  return { open, rowHtml, signed, cam };
 })();
 
 // ════════ 가계부 ════════
@@ -155,7 +206,8 @@ Pages.ledger = (() => {
     return `<div class="av" style="background:${AV_COLORS[hashOf(s1) % AV_COLORS.length]}">${U.esc(ini)}</div>`;
   }
   const man = v => (Math.abs(v) >= 10000 ? `${(v / 10000).toFixed(Math.abs(v) >= 100000 ? 0 : 1).replace(/\.0$/, '')}만` : UI.money(v));
-  const amtSpans = r => [r.income ? `<span class="in">+${UI.money(r.income)}</span>` : '', r.expense ? `<span class="out">-${UI.money(r.expense)}</span>` : ''].filter(Boolean).join(' ');
+  const amtSpans = r => [r.income ? `<span class="in">${Entry.signed(r.income, '+')}</span>` : '', r.expense ? `<span class="out">${Entry.signed(r.expense, '-')}</span>` : ''].filter(Boolean).join(' ');
+  let photos = {};            // 그리는 동안의 {내역 번호: 사진 수}
   // 게시물 사진 칸에 붙일 고양이 (날짜마다 다르게)
   const TILE_STK = ['a02', 'a03', 'a05', 'a06', 'a07', 'a08', 'a09', 'a11', 'a12', 'a14', 'a15', 'a16', 'a17', 'a18', 'a20', 'a21',
     'b01', 'b03', 'b04', 'b05', 'b06', 'b07', 'b09', 'b10', 'b12', 'b13', 'b14', 'b15', 'b16', 'b17', 'b18', 'b19', 'b20', 'b22',
@@ -172,7 +224,7 @@ Pages.ledger = (() => {
   const CAP_LIMIT = 4;
   function capRow(r, cmap, hidden) {
     const sub = [L.codeLabel(cmap, r.code), r.memo].filter(Boolean).join(' · ');
-    return `<li class="tap${hidden ? ' x' : ''}" data-id="${r.id}"><div class="it"><b>${U.esc(r.item || '(품목 없음)')}</b><span>${U.esc(sub)}</span></div><div class="am">${amtSpans(r)}</div></li>`;
+    return `<li class="tap${hidden ? ' x' : ''}" data-id="${r.id}"><div class="it"><b>${U.esc(r.item || '(품목 없음)')}</b>${Entry.cam(photos, r.id)}<span>${U.esc(sub)}</span></div><div class="am">${amtSpans(r)}</div></li>`;
   }
   function feedPost(d, list, cmap, bal) {
     const di = U.sum(list.map(([r]) => r.income)), de = U.sum(list.map(([r]) => r.expense)), n = list.length;
@@ -185,12 +237,12 @@ Pages.ledger = (() => {
       <header class="ph"><div class="ring"><img src="${UI.sticker(App.pref('minimi'))}" alt=""></div>
         <div class="grow"><div class="pt">${U.dateLabel(d)}</div><div class="ps ellipsis">${U.esc(App.ledgerName())} · ${n}건</div></div>
         <button class="iconbtn pmenu" data-d="${d}" aria-label="이 날 메뉴" title="이 날 메뉴">${UI.icon('dots')}</button></header>
-      <div class="ptile t${dd % 5}"><span class="stamp">${stamp}</span><div class="big">${de ? `-${UI.money(de)}` : `+${UI.money(di)}`}</div>
+      <div class="ptile t${dd % 5}"><span class="stamp">${stamp}</span><div class="big">${de ? Entry.signed(de, '-') : Entry.signed(di, '+')}</div>
         <div class="cap">${U.esc(n > 1 ? `${first} 외 ${n - 1}건` : first)}</div><img class="stk" src="${UI.sticker(TILE_STK[hashOf(d) % TILE_STK.length])}" alt=""></div>${dots}
       <div class="pa"><span class="ind${di ? ' on' : ''}" title="${di ? '수입이 있는 날' : '수입 없는 날'}">${UI.icon('heart', di ? 'on' : '')}</span>
         <button class="iconbtn" data-add="${d}" aria-label="이 날 새 내역" title="이 날 새 내역">${UI.icon('comment')}</button>${ord}
         <button class="iconbtn" data-cal="${d}" aria-label="달력에서 보기" title="달력에서 보기">${UI.icon('calendar')}</button></div>
-      <div class="plike">${de ? `지출 <span class="out">-${UI.money(de)}</span>` : ''}${di && de ? ' · ' : ''}${di ? `수입 <span class="in">+${UI.money(di)}</span>` : ''}</div>
+      <div class="plike">${de ? `지출 <span class="out">${Entry.signed(de, '-')}</span>` : ''}${di && de ? ' · ' : ''}${di ? `수입 <span class="in">${Entry.signed(di, '+')}</span>` : ''}</div>
       <ul class="pcap">${list.map(([r], i) => capRow(r, cmap, i >= CAP_LIMIT)).join('')}</ul>
       ${n > CAP_LIMIT ? `<button class="pmore" data-more>내역 ${n}개 모두 보기</button>` : ''}
       <div class="ptime">잔액 ${UI.money(bal)}원</div></article>`;
@@ -212,7 +264,7 @@ Pages.ledger = (() => {
   function tweet(r, bal, cmap) {
     const cat = L.codeLabel(cmap, r.code);
     return `<li class="tap tw" data-id="${r.id}">${avatar(cat)}<div class="grow">
-      <div class="l1"><b>${U.esc(r.item || '(품목 없음)')}</b><span class="meta">@${U.esc(cat.replace(/\s+/g, ''))} · ${U.shortDate(r.date)}</span></div>
+      <div class="l1"><b>${U.esc(r.item || '(품목 없음)')}</b>${Entry.cam(photos, r.id)}<span class="meta">@${U.esc(cat.replace(/\s+/g, ''))} · ${U.shortDate(r.date)}</span></div>
       ${r.memo ? `<div class="txt">${U.esc(r.memo)}</div>` : ''}<div class="money">${amtSpans(r)}</div>
       <div class="acts"><button class="iconbtn" data-edit="${r.id}" aria-label="수정" title="수정">${UI.icon('comment')}</button>
         <button class="iconbtn" data-copy="${r.id}" aria-label="다시 입력" title="다시 입력 (복사)">${UI.icon('repeat')}</button>
@@ -222,7 +274,7 @@ Pages.ledger = (() => {
 
   function dayHtml(theme, d, list, cmap, bal) {
     const di = U.sum(list.map(([r]) => r.income)), de = U.sum(list.map(([r]) => r.expense));
-    const sums = `${di ? `<span class="in">+${UI.money(di)}</span> ` : ''}${de ? `<span class="out">-${UI.money(de)}</span>` : ''}`;
+    const sums = `${di ? `<span class="in">${Entry.signed(di, '+')}</span> ` : ''}${de ? `<span class="out">${Entry.signed(de, '-')}</span>` : ''}`;
     if (theme === 'feed') return feedPost(d, list, cmap, bal);
     if (theme === 'timeline') {
       const ord = list.length > 1 ? `<button class="iconbtn dayord" data-d="${d}" aria-label="이 날 내역 순서 바꾸기" title="순서 바꾸기">${UI.icon('sort')}</button>` : '';
@@ -231,7 +283,7 @@ Pages.ledger = (() => {
     }
     const ord = list.length > 1 ? `<button class="iconbtn dayord" data-d="${d}" aria-label="이 날 내역 순서 바꾸기" title="순서 바꾸기">⇅</button>` : '';
     return `<div class="dayhead"><span>${U.dateLabel(d)}</span><span class="sums">${sums}${ord}</span></div>
-      <ul class="list">${list.map(([r, b]) => Entry.rowHtml(r, b, false, cmap)).join('')}</ul>`;
+      <ul class="list">${list.map(([r, b]) => Entry.rowHtml(r, b, false, cmap, photos)).join('')}</ul>`;
   }
   /** 같은 날 내역 순서 바꾸기 (PC판과 같은 자료 파일에 저장 → PC에서도 같은 순서) */
   function dayOrderSheet(d) {
@@ -260,6 +312,7 @@ Pages.ledger = (() => {
     for (const [r, b] of rows) endBal.set(r.date, b);              // 그날 마지막 잔액 (날짜 순서대로 계산된 값)
     if (s.desc) rows = Ord.applyDayOrder(rows, Ord.dayOrders(lid), true);   // 최근 날짜 위로 (순서를 정한 날은 그 순서 그대로)
     const cmap = L.categoryMap(lid);
+    photos = Att.counts(rows.slice(0, s.limit).map(([r]) => r.id));
     const csvBtn = UI.el(`<button class="iconbtn" title="CSV로 저장" aria-label="CSV로 저장">${sns ? UI.icon('download') : '⤓'}</button>`);
     csvBtn.onclick = () => exportCsv(rows);
     tools.appendChild(csvBtn);
@@ -321,6 +374,7 @@ Pages.ledger = (() => {
           <div><div class="k">차액</div><div class="v ${UI.moneyCls(inc - exp)}">${UI.money(inc - exp)}</div></div></div>
           <div class="kv small" style="margin-top:6px;border-top:1px dashed var(--line);padding-top:5px"><span>현재 잔액 (오늘까지)</span><b class="${UI.moneyCls(bal)}">${UI.money(bal)}원</b></div></div>`);
       },
+      budget: () => Extra.budgetCard(lid, s.y, s.m),
       opts: () => {
         if (theme === 'feed') {
           const o = UI.el(`<div class="ig-tabs"><button data-o="month" class="${s.all ? '' : 'on'}">${UI.icon('grid')}${s.m}월</button>
@@ -444,7 +498,7 @@ Pages.search = (() => {
     const run = () => {
       read();
       let amount = null;
-      try { amount = s.amount.trim() ? U.parseMoney(s.amount) : null; } catch (_) { UI.toast('금액은 숫자로 입력하세요.'); return; }
+      try { amount = s.amount.trim() ? U.calcMoney(s.amount) : null; } catch (_) { UI.toast('금액은 숫자로 입력하세요.'); return; }
       const rows = L.search(lid, { start: s.start || null, end: s.end || null, text: s.text.trim(), codes: s.codes, amount,
         amountSide: s.side, amountOp: s.op, order: s.order, desc: s.desc });
       s.ran = true;

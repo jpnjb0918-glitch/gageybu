@@ -25,7 +25,8 @@ ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 KEEP_PYQT = {'__init__.py', 'QtCore.pyd', 'QtGui.pyd', 'QtWidgets.pyd', 'QtPrintSupport.pyd'}
 KEEP_QT_BIN = {'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6PrintSupport.dll'}
 KEEP_PLUGINS = {'platforms/qwindows.dll', 'platforms/qoffscreen.dll', 'styles/qmodernwindowsstyle.dll',
-                'imageformats/qico.dll', 'imageformats/qjpeg.dll', 'imageformats/qgif.dll'}
+                'imageformats/qico.dll', 'imageformats/qjpeg.dll', 'imageformats/qgif.dll',
+                'imageformats/qwebp.dll'}      # 영수증 사진 (1.7.0): 휴대폰·웹에서 받은 webp 도 열리게
 KEEP_TR = {'qtbase_ko.qm', 'qt_ko.qm'}
 # 윈도우에 기본으로 있는 DLL (의존성 점검에서 제외)
 SYSTEM_DLL = re.compile(r'^(api-ms-win-.*|ext-ms-.*|kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|ws2_32|'

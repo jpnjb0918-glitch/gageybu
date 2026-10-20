@@ -639,6 +639,9 @@ class ThemeTab(QWidget):
         self.side.addItem('왼쪽', 'left')
         ol.addRow('메뉴', h(button('메뉴 순서 바꾸기…', self.order_nav), QLabel('맨 위 메뉴가 처음 화면'), 'stretch'))
         ol.addRow('가계부 화면', h(button('화면 구성 순서…', self.order_layout), QLabel('입력 상자'), self.side, 'stretch'))
+        self.budget_chk = QCheckBox('입력 상자 밑에 이달 예산 막대·무지출 날 보이기')
+        self.budget_chk.toggled.connect(self._budget_toggled)
+        ol.addRow('', self.budget_chk)
         ol.addRow('', QLabel('계정과목 순서는 계정과목 탭, 같은 날 내역 순서는 가계부 화면의 [같은 날 순서…]에서 바꿉니다.'))
         # 이 테마의 색
         cbox = QGroupBox('이 테마의 색')
@@ -696,6 +699,10 @@ class ThemeTab(QWidget):
         self.T.set_ledger_layout(keys if what == 'save' else None)
         self.page.app.data_changed()
 
+    def _budget_toggled(self, on):
+        self.T.set_pref('budget_card', bool(on))
+        self.page.app.data_changed()
+
     def _side_changed(self, *_):
         self.T.set_input_side(self.side.currentData())
         self.page.app.data_changed()
@@ -727,8 +734,9 @@ class ThemeTab(QWidget):
 
     def refresh(self):
         T = self.T
-        for w in (self.theme, self.font, self.marquee, self.side, self.fsize):
+        for w in (self.theme, self.font, self.marquee, self.side, self.fsize, self.budget_chk):
             w.blockSignals(True)
+        self.budget_chk.setChecked(T.pref('budget_card'))
         f = QApplication.font()
         cur = f.pixelSize() if f.pixelSize() > 0 else round(f.pointSizeF() * self.logicalDpiY() / 72)
         self.fsize.setValue(T.font_px() or cur)
@@ -737,7 +745,7 @@ class ThemeTab(QWidget):
         self.theme.setCurrentIndex(max(0, self.theme.findData(T.pref('theme'))))
         self.font.setCurrentIndex(max(0, self.font.findData(T.pref('font'))))
         self.marquee.setChecked(T.pref('marquee'))
-        for w in (self.theme, self.font, self.marquee, self.side, self.fsize):
+        for w in (self.theme, self.font, self.marquee, self.side, self.fsize, self.budget_chk):
             w.blockSignals(False)
         self._draw_colors()
         retro = T.pref('theme') == 'retro'

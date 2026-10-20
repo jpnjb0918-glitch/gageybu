@@ -134,15 +134,60 @@ const UI = (() => {
       return `<div class="f">${lab}${inp}${hint}</div>`;
     }).join('') + '</div>';
   }
-  /** 금액 칸: 입력하는 대로 세 자리 쉼표 */
+  /** 계산식인지 (숫자 뒤 연산자·괄호) — 계산식이면 입력하는 동안 쉼표를 넣지 않고, 칸을 벗어날 때 계산 */
+  const isExpr = v => /\d\s*[-+*/×÷xX]|[()]/.test(String(v || ''));
+  /** 금액 칸: 입력하는 대로 세 자리 쉼표. 옆의 [계산] 단추로 계산기 (12000+3500 처럼) */
   function bindMoney(root) {
     $$('input.money', root).forEach(inp => {
+      if (inp.dataset.bound) return;
+      inp.dataset.bound = '1';
       inp.addEventListener('input', () => {
+        if (isExpr(inp.value)) return;
         const neg = inp.value.trim().startsWith('-');
         const digits = inp.value.replace(/[^0-9]/g, '').replace(/^0+(?=\d)/, '');
         inp.value = (neg ? '-' : '') + (digits ? Number(digits).toLocaleString('en-US') : '');
       });
+      inp.addEventListener('blur', () => {
+        if (!isExpr(inp.value)) return;
+        try { const v = U.calcMoney(inp.value); inp.value = v ? money(v) : ''; } catch (_) { /* 저장할 때 안내 */ }
+      });
+      const wrap = el('<div class="mwrap"></div>');
+      inp.parentNode.insertBefore(wrap, inp);
+      wrap.appendChild(inp);
+      const b = el(`<button type="button" class="calcbtn" aria-label="계산기" title="계산기 (12000+3500 처럼)">${icon('calc')}</button>`);
+      b.onclick = () => calcPad(inp);
+      wrap.appendChild(b);
     });
+  }
+  /** 계산기 창: 누른 식과 결과를 보여 주고 [넣기]로 금액 칸에 */
+  function calcPad(inp) {
+    let expr = String(inp.value || '').replace(/,/g, '');
+    const keys = ['7', '8', '9', '÷', '4', '5', '6', '×', '1', '2', '3', '−', '0', '00', '000', '+', 'C', '(', ')', '⌫'];
+    const body = el(`<div class="calcpad"><div class="cp-expr"></div><div class="cp-res"></div>
+      <div class="cp-keys">${keys.map(k => `<button type="button" data-k="${k}" class="${'÷×−+'.includes(k) ? 'op' : k === 'C' || k === '⌫' ? 'fn' : ''}">${k}</button>`).join('')}</div></div>`);
+    const ex = $('.cp-expr', body), res = $('.cp-res', body);
+    const norm = t => t.replace(/÷/g, '/').replace(/×/g, '*').replace(/−/g, '-');
+    function draw() {
+      ex.textContent = expr.replace(/\//g, '÷').replace(/\*/g, '×').replace(/(\d)-/g, '$1−') || '0';
+      let r = '';
+      try { r = expr ? `= ${money(U.calcMoney(expr))}원` : ''; } catch (_) { r = '…'; }
+      res.textContent = r;
+    }
+    on(body, '.cp-keys button', 'click', (e, b) => {
+      const k = b.dataset.k;
+      if (k === 'C') expr = '';
+      else if (k === '⌫') expr = expr.slice(0, -1);
+      else expr += norm(k);
+      draw();
+    });
+    draw();
+    sheet({ title: '계산기', body, buttons: [{ label: '취소' }, { label: '넣기', cls: 'pri', onClick: () => {
+      let v;
+      try { v = expr ? U.calcMoney(expr) : 0; } catch (e) { toast(e.message || '계산할 수 없는 식입니다'); return false; }
+      inp.value = v ? money(v) : '';
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+      return undefined;
+    } }] });
   }
   function form(fields, values) {
     const f = el(formHtml(fields, values));
@@ -158,7 +203,7 @@ const UI = (() => {
       let v;
       if (f.type === 'check') v = x.checked;
       else if (f.type === 'money') {
-        try { v = U.parseMoney(x.value); } catch (e) { throw new Error(`${f.label}: 금액은 숫자로 입력하세요.`); }
+        try { v = U.calcMoney(x.value); } catch (e) { throw new Error(`${f.label}: 금액은 숫자(또는 계산식)로 입력하세요.`); }
       } else if (f.type === 'int') {
         v = x.value.trim() === '' ? null : parseInt(x.value, 10);
         if (v !== null && isNaN(v)) throw new Error(`${f.label}: 숫자로 입력하세요.`);
@@ -324,6 +369,13 @@ const UI = (() => {
     palette: '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.1-.9-1.6-.9-2.6 0-1 .8-1.7 1.8-1.7h2.1A4.2 4.2 0 0 0 21 10.8C21 6.5 17 3 12 3z"/><circle class="dot" cx="7.5" cy="11.5" r="1.3"/><circle class="dot" cx="10" cy="7.5" r="1.3"/><circle class="dot" cx="14.5" cy="7.5" r="1.3"/>',
     table: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10"/>',
     list: '<path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12"/><circle class="dot" cx="4.5" cy="6.5" r="1.2"/><circle class="dot" cx="4.5" cy="12" r="1.2"/><circle class="dot" cx="4.5" cy="17.5" r="1.2"/>',
+    // 1.7.0: 사진·자주 쓰는 내역·문자·목표·이체 (PC판 icons.py 와 같은 모양)
+    camera: '<path d="M4.5 7.5h3l1.6-2.5h5.8l1.6 2.5h3A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5V9a1.5 1.5 0 0 1 1.5-1.5z"/><circle cx="12" cy="13.2" r="3.6"/>',
+    star: '<path class="f" d="M12 3.4l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.8l-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z"/>',
+    chat: '<path d="M5.5 4.5h13A2.5 2.5 0 0 1 21 7v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3.5v-3.5h-1A2.5 2.5 0 0 1 3 15V7a2.5 2.5 0 0 1 2.5-2.5z"/><path d="M7.5 9.5h9M7.5 13h6"/>',
+    target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle class="dot" cx="12" cy="12" r="1.3"/>',
+    swap: '<path d="M4 8h15M15.5 4.5 19 8l-3.5 3.5M20 16H5M8.5 12.5 5 16l3.5 3.5"/>',
+    calc: '<rect x="5" y="2.8" width="14" height="18.4" rx="2.4"/><path d="M8.2 7h7.6M8.6 11.4h.1M12 11.4h.1M15.4 11.4h.1M8.6 14.8h.1M12 14.8h.1M15.4 14.8v3.4M8.6 18.2h.1M12 18.2h.1"/>',
   };
   /** 아이콘 SVG 문자열 (name: ICONS 의 이름) */
   const icon = (name, cls) => `<svg class="ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.dots}</svg>`;
@@ -462,7 +514,7 @@ const UI = (() => {
     return box;
   }
 
-  return { $, $$, el, on, sticker, money, moneyCls, toast, sheet, closeTop, isOpen, alert: alertBox, confirm, tableBox,
+  return { $, $$, el, on, sticker, money, moneyCls, toast, sheet, closeTop, isOpen, alert: alertBox, confirm, tableBox, calcPad, isExpr,
     formHtml, form, readForm, formSheet, bindMoney, codeOptions, monthNav, yearNav, monthPicker, seg, dialog, empty, reorder, colorPicker, icon, ICONS,
     normHex, hexToHsl, hslToHex };
 })();

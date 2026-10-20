@@ -189,8 +189,12 @@ class ReportsPage(QWidget):
         self.b_spin = _year_spin(t.year)
         self.b_spin.valueChanged.connect(lambda *_: self.refresh())
         self.t_budget = _Tab(self, [QLabel('연도'), self.b_spin], self._budget_cell)
+        from .extras import InsightTab, TagTab
+        self.t_insight = InsightTab(self)
+        self.t_tags = TagTab(self)
         for tab, name in ((self.t_month, '월결산'), (self.t_year, '년결산'), (self.t_daily, '월별 일일결산'),
-                          (self.t_custom, '사용자정의 결산'), (self.t_budget, '년예산')):
+                          (self.t_custom, '사용자정의 결산'), (self.t_budget, '년예산'), (self.t_insight, '이달 리포트'),
+                          (self.t_tags, '태그')):
             self.tabs.addTab(tab, name)
         self.tabs.currentChanged.connect(lambda *_: self.refresh())
         lay = QVBoxLayout(self)
@@ -223,8 +227,12 @@ class ReportsPage(QWidget):
                 error(self, '시작일이 종료일보다 늦습니다.')
                 return
             self.t_custom.view.show_report(RP.custom(self.con, lid, s, e))
-        else:
+        elif i == 4:
             self.t_budget.view.show_report(RP.budget_year(self.con, lid, self.b_spin.value()))
+        elif i == 5:
+            self.t_insight.refresh()
+        else:
+            self.t_tags.refresh()
 
     # ── 칸 두 번 누르기 ──
     def _detail(self, row, period):

@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="kr.gagyebu.mobile"
-    android:versionCode="7"
-    android:versionName="1.5.1">
+    android:versionCode="8"
+    android:versionName="1.6.0">
 
     <!-- 최소 안드로이드 7.0(API 24). 안드로이드 15·16은 API 24 미만 대상 앱 설치를 막으므로 대상은 34 -->
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
     <!-- 인터넷: 새 버전 확인(GitHub 공개 릴리스 목록 읽기)과 새 APK 받기에만 씀. 가계부 자료는 보내지 않음
          설치 요청: 받은 새 APK 의 설치 화면 열기 (설치는 안드로이드가 따로 물어봄)
-         저장소 권한 없음: 자료는 앱 안에만 있고, 파일 주고받기는 시스템 파일 선택 창·공유 창으로만 함 -->
+         저장소 권한 없음: 자료는 앱 안에만 있고, 파일 주고받기는 시스템 파일 선택 창·공유 창으로만 함
+         카메라·문자 권한 없음: 영수증은 사진기 앱에 찍기를 부탁해 한 장만 받고, 문자는 사용자가 붙여넣거나 공유한 글만 읽음 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
@@ -27,7 +28,31 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- 문자 앱에서 카드·은행 알림 문자를 '공유' → 가계부의 문자 붙여넣기 창으로 -->
+            <intent-filter android:label="@string/share_label">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
+        <!-- 홈 화면 위젯 '가계부 한눈에' (오늘·이달 지출, 예산 남은 돈, ＋ 입력) -->
+        <receiver
+            android:name=".GagyebuWidget"
+            android:exported="false"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info" />
+        </receiver>
+        <!-- 영수증 사진 찍기: 사진기 앱이 찍은 사진을 써 넣을 곳 (그 앱에게만 잠깐 쓰기 권한) -->
+        <provider
+            android:name=".CaptureProvider"
+            android:authorities="kr.gagyebu.mobile.capture"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <!-- 백업 파일 보내기(카카오톡·디스코드 등): 앱 캐시 share/ 의 사본만 고른 앱에 잠깐 읽기 권한으로 -->
         <provider
             android:name=".ShareProvider"

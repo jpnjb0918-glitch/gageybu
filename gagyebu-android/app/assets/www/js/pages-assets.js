@@ -57,8 +57,15 @@ Pages.assets = (() => {
       <div class="kv"><span>자산 합계</span><b class="in">${UI.money(sm.자산합계)}</b></div>
       <div class="kv small muted"><span>예금 ${UI.money(sm.예금)} · 증권 ${UI.money(sm.증권)} · 부동산 ${UI.money(sm.부동산)} · 기타 ${UI.money(sm.기타)}</span></div>
       <div class="kv"><span>부채 합계</span><b class="out">${UI.money(sm.부채합계)}</b></div>
-      <div class="kv small muted"><span>대출 ${UI.money(sm.대출)} · 카드 미결제 ${UI.money(sm.카드)} · 기타부채 ${UI.money(sm.기타부채)}</span></div>
+      <div class="kv small muted"><span>대출 ${UI.money(sm.대출)} · 카드 미결제 ${UI.money(sm.카드)} · 기타부채 ${UI.money(sm.기타부채)}${sm.갚을돈 ? ` · 갚을 돈 ${UI.money(sm.갚을돈)}` : ''}</span></div>
+      ${sm.받을돈 ? `<div class="kv small muted"><span>받을 돈 ${UI.money(sm.받을돈)} (자산에 들어감)</span></div>` : ''}
       <div class="kv" style="border-top:1px dashed var(--line);margin-top:4px;padding-top:4px"><span class="bold">순자산</span><b class="${UI.moneyCls(sm.순자산)}">${UI.money(sm.순자산)}원</b></div></div>`));
+    // 1.7.0: 저축 목표 · 빌려준 돈/빌린 돈 · 통장끼리 이체
+    const more = UI.el(`<div class="row wrap amore"><button class="btn sm" data-go="goals">${UI.icon('target')}저축 목표</button>
+      <button class="btn sm" data-go="debts">${UI.icon('user')}빌려준·빌린 돈</button><button class="btn sm" data-tr>${UI.icon('swap')}통장끼리 이체</button></div>`);
+    UI.on(more, '[data-go]', 'click', (e, b) => App.go(b.dataset.go, {}, true));
+    UI.$('[data-tr]', more).onclick = () => Extra.transferSheet(null);
+    c.appendChild(more);
     c.appendChild(UI.seg(TABS, s.tab, k => { s.tab = k; App.render(true); }));
     if (s.tab === 'card') renderCards(c); else renderAccounts(c, s.tab);
   }
@@ -144,6 +151,11 @@ Pages.account = (() => {
     const edit = UI.el('<button class="btn sm">정보 수정</button>');
     edit.onclick = () => Pages.assets.editAccount(a.kind, a);
     tools.appendChild(edit);
+    if (a.kind === 'bank') {
+      const tr = UI.el(`<button class="btn sm">이체</button>`);
+      tr.onclick = () => Extra.transferSheet(a.id);
+      tools.appendChild(tr);
+    }
     const bal = A.accountBalance(a.id);
     const info = AssetFormInfo(a, x);
     c.appendChild(UI.el(`<div class="box"><div class="kv"><b>${U.esc(a.name)}</b><span class="muted small">${U.esc(A.KIND_LABEL[a.kind])}</span></div>${info}
@@ -153,7 +165,7 @@ Pages.account = (() => {
     if (!txs.length) c.appendChild(UI.el(UI.empty('거래 내역이 없어요', 'a04')));
     else {
       c.appendChild(UI.el(`<ul class="list">${txs.map(([t, b]) => `<li class="tap" data-t="${t.id}"><div class="grow"><div class="main-t ellipsis"><span class="muted small">${t.date}</span> ${U.esc(t.summary)}</div>
-        <div class="sub ellipsis">${U.esc(t.memo || '')}${t.entry_id ? ' · 장부에도 저장됨' : ''}</div></div>
+        <div class="sub ellipsis">${U.esc(t.memo || '')}${t.entry_id ? ' · 장부에도 저장됨' : ''}${t.link_id ? ' · 이체 (짝 거래와 함께 바뀜)' : ''}</div></div>
         <div class="right nowrap">${t.deposit ? `<div class="in bold">+${UI.money(t.deposit)}</div>` : ''}${t.withdraw ? `<div class="out bold">-${UI.money(t.withdraw)}</div>` : ''}
         <div class="tiny muted">${a.kind === 'bank' ? '잔액' : '누계'} ${UI.money(b)}</div></div></li>`).join('')}</ul>`));
       UI.on(c, 'li[data-t]', 'click', (e, li) => txSheet(a, txs.find(([t]) => t.id === Number(li.dataset.t))[0]));

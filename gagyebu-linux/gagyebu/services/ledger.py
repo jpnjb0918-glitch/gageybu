@@ -1,4 +1,6 @@
 """장부·계정과목·수입/지출 내역."""
+import re
+
 from .. import db
 from ..util import CODE_CHARS, iso, is_income_code
 
@@ -21,6 +23,8 @@ def add_ledger(con, name, copy_from=None, codes_only=False):
                         (lid, copy_from))
             con.execute('INSERT INTO budget SELECT ?, ym, code, amount FROM budget WHERE ledger_id=?', (lid, copy_from))
             con.execute('INSERT INTO item_word SELECT ?, name, count FROM item_word WHERE ledger_id=?', (lid, copy_from))
+            con.execute('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort) '
+                        'SELECT ?,item,income,expense,code,memo,sort FROM favorite WHERE ledger_id=?', (lid, copy_from))
             from .recurring import processed_through
             for r in con.execute('SELECT * FROM recurring WHERE ledger_id=?', (copy_from,)).fetchall():
                 thr = processed_through(con, r['id'])
@@ -335,3 +339,77 @@ def code_label(cmap, code):
 def signed_amount(code, income, expense):
     """보고서용: 수입 계정은 수입-지출, 지출 계정은 지출-수입 (환불 등 반대 방향 입력도 반영)."""
     return (income - expense) if is_income_code(code) else (expense - income)
+
+
+# ── 자주 쓰는 내역 (1.7.0) ──────────────────────────────
+def favorites(con, lid):
+    return con.execute('SELECT * FROM favorite WHERE ledger_id=? ORDER BY sort, id', (lid,)).fetchall()
+
+
+def save_favorite(con, lid, f, fid=None):
+    """f: item·income·expense·code·memo (날짜는 넣을 때 정함)"""
+    vals = ((f.get('item') or '').strip(), int(f.get('income') or 0), int(f.get('expense') or 0),
+            (f.get('code') or '').strip(), (f.get('memo') or '').strip())
+    if fid:
+        con.execute('UPDATE favorite SET item=?,income=?,expense=?,code=?,memo=? WHERE id=?', vals + (fid,))
+    else:
+        sort = con.execute('SELECT COALESCE(MAX(sort),0)+1 FROM favorite WHERE ledger_id=?', (lid,)).fetchone()[0]
+        fid = con.execute('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort) VALUES(?,?,?,?,?,?,?)',
+                          (lid,) + vals + (sort,)).lastrowid
+    con.commit()
+    return fid
+
+
+def delete_favorite(con, fid):
+    con.execute('DELETE FROM favorite WHERE id=?', (fid,))
+    con.commit()
+
+
+def move_favorite(con, lid, fid, delta):
+    ids = [r['id'] for r in favorites(con, lid)]
+    i = ids.index(fid)
+    j = i + delta
+    if 0 <= j < len(ids):
+        ids[i], ids[j] = ids[j], ids[i]
+        con.executemany('UPDATE favorite SET sort=? WHERE id=?', [(k, x) for k, x in enumerate(ids)])
+        con.commit()
+
+
+# ── #태그 (1.7.0): 품목·메모의 '#낱말' ─────────────────────
+TAG_RE = re.compile(r'#([^\s#.,;:!?()\[\]{}"\'<>/]+)')
+
+
+def tags_of(*texts):
+    """글에서 태그 목록 (순서대로, 같은 것은 한 번)"""
+    out = []
+    for t in texts:
+        for m in TAG_RE.finditer(t or ''):
+            if m.group(1) not in out:
+                out.append(m.group(1))
+    return out
+
+
+def tag_summary(con, lid, start=None, end=None):
+    """[{'tag','count','income','expense'}] — 지출 많은 순 (같으면 건수·이름 순)"""
+    q = "SELECT item, memo, income, expense FROM entry WHERE ledger_id=? AND (item LIKE '%#%' OR memo LIKE '%#%')"
+    a = [lid]
+    if start:
+        q += ' AND date>=?'
+        a.append(iso(start))
+    if end:
+        q += ' AND date<=?'
+        a.append(iso(end))
+    acc = {}
+    for r in con.execute(q, a):
+        for t in tags_of(r['item'], r['memo']):
+            x = acc.setdefault(t, {'tag': t, 'count': 0, 'income': 0, 'expense': 0})
+            x['count'] += 1
+            x['income'] += r['income']
+            x['expense'] += r['expense']
+    return sorted(acc.values(), key=lambda x: (-x['expense'], -x['count'], x['tag']))
+
+
+def entries_with_tag(con, lid, tag, start=None, end=None):
+    """그 태그가 정확히 들어 있는 내역 (#여행 을 찾을 때 #여행지 는 빼고)"""
+    rows = search(con, lid, start, end, text='#' + tag)
+    return [r for r in rows if tag in tags_of(r['item'], r['memo'])]

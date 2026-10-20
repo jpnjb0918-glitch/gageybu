@@ -90,7 +90,9 @@ class AccountTab(QWidget):
         top = QWidget()
         tl = QVBoxLayout(top)
         tl.setContentsMargins(0, 0, 0, 0)
-        tl.addWidget(h(QLabel(f'<b>{A.KIND_LABEL[kind]} 목록</b>'), QLabel(NOTE[kind]), 'stretch',
+        extra = [button('통장끼리 이체…', self.transfer, '내 통장끼리 옮긴 돈을 짝으로 기록 (가계부 지출에는 안 들어감)')] \
+            if kind == 'bank' else []
+        tl.addWidget(h(QLabel(f'<b>{A.KIND_LABEL[kind]} 목록</b>'), QLabel(NOTE[kind]), 'stretch', *extra,
                        button('추가', self.add), button('수정', self.edit), button('삭제', self.delete),
                        button('위로', lambda: self.move(-1)), button('아래로', lambda: self.move(1))))
         tl.addWidget(self.list)
@@ -173,6 +175,11 @@ class AccountTab(QWidget):
             A.move(self.con, 'account', aid, d, 'kind=?', (self.kind,))
             self.refresh()
 
+    def transfer(self):
+        from .extras import TransferDialog
+        if TransferDialog(self, self.con, self.aid()).exec():
+            self.page.changed()
+
     def load_txs(self):
         aid = self.aid()
         if not aid:
@@ -183,7 +190,8 @@ class AccountTab(QWidget):
         rows = A.account_txs(self.con, aid)
         fill(self.txs, [[cell(r['date'], CENTER, data=r['id']), cell(r['summary']), money_cell(r['deposit'], 'in'),
                          money_cell(r['withdraw'], 'out'), money_cell(bal, blank_zero=False), cell(r['memo']),
-                         cell('연결' if r['entry_id'] else '', CENTER)] for r, bal in reversed(rows)])
+                         cell('연결' if r['entry_id'] else '이체' if r['link_id'] else '', CENTER)]
+                        for r, bal in reversed(rows)])
         extra = f"   현재잔액 {fmt_money(A.account_balance(self.con, aid))}원" if self.kind == 'bank' else ''
         self.tx_lbl.setText(f"<b>{a['company']} {a['name']}</b> 거래 {len(rows)}건{extra}")
 
@@ -502,8 +510,11 @@ class AssetsPage(QWidget):
         self.sec = AccountTab(self, 'securities')
         self.ins = AccountTab(self, 'insurance')
         self.prop = AccountTab(self, 'property')
+        from .extras import DebtsTab, GoalsTab
+        self.goals = GoalsTab(self)
+        self.debts = DebtsTab(self)
         for t, n in ((self.bank, '은행통장'), (self.card_tab, '신용카드'), (self.sec, '증권'), (self.ins, '보험'),
-                     (self.prop, '부동산/기타')):
+                     (self.prop, '부동산/기타'), (self.goals, '저축 목표'), (self.debts, '빌려준·빌린 돈')):
             self.tabs.addTab(t, n)
         self.tabs.currentChanged.connect(lambda *_: self.tabs.currentWidget().refresh())
         lay = QVBoxLayout(self)
@@ -522,7 +533,9 @@ class AssetsPage(QWidget):
         s = A.summary(self.con)
         m = fmt_money
         self.sum_lbl.setText(f"<b>자산 합계 {m(s['자산합계'])}</b>  (예금 {m(s['예금'])} · 증권 {m(s['증권'])} · "
-                             f"부동산 {m(s['부동산'])} · 기타 {m(s['기타'])})&nbsp;&nbsp;&nbsp;&nbsp;"
+                             f"부동산 {m(s['부동산'])} · 기타 {m(s['기타'])}" + (f" · 받을 돈 {m(s['받을돈'])}" if s['받을돈'] else '') +
+                             ")&nbsp;&nbsp;&nbsp;&nbsp;"
                              f"<b>부채 합계 {m(s['부채합계'])}</b>  (대출 {m(s['대출'])} · 카드 {m(s['카드'])} · "
-                             f"기타부채 {m(s['기타부채'])})&nbsp;&nbsp;&nbsp;&nbsp;<b style='color:{INCOME_COLOR.name()}'>순자산 {m(s['순자산'])}원</b>")
+                             f"기타부채 {m(s['기타부채'])}" + (f" · 갚을 돈 {m(s['갚을돈'])}" if s['갚을돈'] else '') +
+                             f")&nbsp;&nbsp;&nbsp;&nbsp;<b style='color:{INCOME_COLOR.name()}'>순자산 {m(s['순자산'])}원</b>")
         self.tabs.currentWidget().refresh()

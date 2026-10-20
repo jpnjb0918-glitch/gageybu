@@ -68,8 +68,48 @@ public class MainActivity extends Activity {
             }
         });
         web.setWebChromeClient(new WebChromeClient());
+        handleIntent(getIntent());
         web.loadUrl("file:///android_asset/www/index.html");
         setContentView(web);
+    }
+
+    /** 위젯의 [＋ 입력]·문자 앱에서 '공유'로 열렸을 때: 부탁을 적어 두고, 화면이 떠 있으면 바로 알림 */
+    private void handleIntent(Intent it) {
+        if (it == null || bridge == null) {
+            return;
+        }
+        String json = null;
+        try {
+            if (GagyebuWidget.ACTION_NEW.equals(it.getAction())) {
+                json = new org.json.JSONObject().put("action", "new").toString();
+            } else if (Intent.ACTION_SEND.equals(it.getAction())) {
+                CharSequence t = it.getCharSequenceExtra(Intent.EXTRA_TEXT);
+                if (t != null && t.length() > 0) {
+                    String text = t.toString();
+                    if (text.length() > 20000) {
+                        text = text.substring(0, 20000);
+                    }
+                    json = new org.json.JSONObject().put("action", "sms").put("text", text).toString();
+                }
+            }
+        } catch (Exception ignored) {
+            json = null;
+        }
+        if (json == null) {
+            return;
+        }
+        bridge.setLaunch(json);
+        it.setAction(Intent.ACTION_MAIN);          // 화면을 다시 만들 때(회전 등) 또 하지 않게
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+        if (web != null) {
+            web.evaluateJavascript("window.App&&App.onLaunch&&App.onLaunch()", null);
+        }
     }
 
     void openExternal(String url) {

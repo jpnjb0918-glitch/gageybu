@@ -5,7 +5,7 @@ const Pages = {};
 const App = (() => {
   const MOODS = ['행복 (^-^)', '신남 (^0^)/', '알뜰 (-_-)b', '월급날 ♡(^_^)♡', '두근두근 (*^^*)',
     '텅장 (ㅠ_ㅠ)', '지름신 강림 (>_<)', '피곤 (-_-)zZ'];
-  const DEFAULTS = { theme: 'retro', font: 'pixel', fontsize: 'm', marquee: 'true', minimi: 'b16', mood: MOODS[0], motto: '' };
+  const DEFAULTS = { theme: 'retro', font: 'pixel', fontsize: 'm', marquee: 'true', minimi: 'b16', mood: MOODS[0], motto: '', budget_card: 'true' };
   const SIZES = { pixel: { s: 13, m: 14, l: 16, xl: 18 }, system: { s: 14, m: 15, l: 17, xl: 19 } };
   // 메뉴: 순서는 사용자가 바꿀 수 있음 (앞 4개 = 아래 탭, 나머지 = 더보기 화면)
   const NAV = { ledger: ['가계부', 'a22'], calendar: ['달력', 'b11'], report: ['결산', 'b30'], assets: ['자산', 'a04'],
@@ -18,7 +18,7 @@ const App = (() => {
     anniv: 'gift', contacts: 'user', diary: 'book', memo: 'note', settings: 'gear', help: 'help', more: 'more' };
   const navIcon = k => NAV_ICON[k] || 'dots';
   // 가계부 화면 구성: 덩어리 순서도 바꿀 수 있음
-  const LAYOUT = { monthnav: '달 이동 (◀ 10월 ▶)', stories: '지출 많은 계정 동그라미 (피드 테마)', stats: '이달 수입·지출 요약', opts: '보기 설정 (전체 기간·최근 것 위로)', list: '내역 목록' };
+  const LAYOUT = { monthnav: '달 이동 (◀ 10월 ▶)', stories: '지출 많은 계정 동그라미 (피드 테마)', stats: '이달 수입·지출 요약', budget: '이달 예산 막대·무지출', opts: '보기 설정 (전체 기간·최근 것 위로)', list: '내역 목록' };
   const st = { lid: null, page: 'ledger', params: {}, history: [], prefs: {} };
   let N = null;
   let ui = {};
@@ -36,8 +36,13 @@ const App = (() => {
   const moreKeys = () => navOrder().slice(NAV_TABS);
   const navLabel = k => (k === 'more' ? MORE : NAV[k] || [k, 'b16']);
   // 순서를 따로 정하지 않았으면 테마에 맞는 기본 순서 (피드: 프로필 머리가 맨 위, 타임라인: 탭이 맨 위)
-  const LAYOUT_DEFAULT = { feed: ['stats', 'monthnav', 'stories', 'opts', 'list'], timeline: ['opts', 'monthnav', 'stats', 'stories', 'list'] };
-  const ledgerLayout = () => keyOrder(prefJson('ledger_layout', null) || LAYOUT_DEFAULT[layoutOf(theme())] || [], Object.keys(LAYOUT));
+  const LAYOUT_DEFAULT = { feed: ['stats', 'monthnav', 'stories', 'budget', 'opts', 'list'], timeline: ['opts', 'monthnav', 'stats', 'budget', 'stories', 'list'] };
+  function ledgerLayout() {
+    const saved = prefJson('ledger_layout', null);
+    // 1.7.0 전에 순서를 정해 둔 사람: 새 '예산 막대'는 내역 목록 바로 위에 (맨 끝 = 목록 밑에 숨지 않게)
+    if (Array.isArray(saved) && !saved.includes('budget')) { const i = saved.indexOf('list'); saved.splice(i < 0 ? saved.length : i, 0, 'budget'); }
+    return keyOrder(saved || LAYOUT_DEFAULT[layoutOf(theme())] || [], Object.keys(LAYOUT));
+  }
   function setPref(k, v) {
     if (v === null || v === undefined) delete st.prefs[k]; else st.prefs[k] = String(v);
     try { N.setPref(k, v === null || v === undefined ? null : String(v)); } catch (_) { /* 무시 */ }
@@ -360,8 +365,22 @@ const App = (() => {
     }
     ui.content.scrollTop = top;
   }
-  /** 자료가 바뀌면 머리와 지금 화면을 다시 그림 (스크롤 위치 유지) */
-  function dataChanged() { render(true); }
+  /** 자료가 바뀌면 머리와 지금 화면을 다시 그림 (스크롤 위치 유지) + 홈 화면 위젯도 새로 (잠깐 모아서) */
+  let widgetTimer = null;
+  const widgetNow = () => { try { if (N && N.widgetRefresh) N.widgetRefresh(); } catch (_) { /* 오래된 앱 껍데기 */ } };
+  function dataChanged() {
+    render(true);
+    clearTimeout(widgetTimer);
+    widgetTimer = setTimeout(widgetNow, 600);
+  }
+  /** 위젯의 [＋ 입력]·문자 앱 '공유'로 열렸을 때 (켤 때와, 켜져 있는 중에 안드로이드가 알려 줄 때) */
+  function onLaunch() {
+    let a = null;
+    try { const t = N && N.takeLaunchAction ? N.takeLaunchAction() : ''; a = t ? JSON.parse(t) : null; } catch (_) { a = null; }
+    if (!a || !ui.content) return;
+    if (a.action === 'new') { if (st.page !== 'ledger') go('ledger'); Entry.open({ date: U.today() }); }
+    else if (a.action === 'sms') { if (st.page !== 'ledger') go('ledger'); Extra.smsSheet(a.text || ''); }
+  }
   function fab(onClick, label) {
     const lay = layoutOf(theme());
     const b = UI.el(`<button class="fab" aria-label="${U.esc(label || '추가')}" title="${U.esc(label || '추가')}">${lay === 'feed' ? UI.icon('plus') : lay === 'timeline' ? UI.icon('add') : '＋'}</button>`);
@@ -377,6 +396,7 @@ const App = (() => {
     setPref('last_lid', lid);
     reloadLedgers();
     render();
+    widgetNow();                  // 위젯도 고른 장부로
     checkRecurring();
   }
 
@@ -480,7 +500,10 @@ const App = (() => {
     applyTheme();
     reloadLedgers();
     go(tabKeys()[0]);
-    setTimeout(() => { checkRecurring(); checkReminders(); }, 350);
+    let launched = false;
+    try { launched = !!(N.takeLaunchAction && (st.launch = N.takeLaunchAction())); } catch (_) { launched = false; }
+    if (launched) setTimeout(() => { const t = st.launch; st.launch = null; try { const a = JSON.parse(t); if (a.action === 'new') Entry.open({ date: U.today() }); else if (a.action === 'sms') Extra.smsSheet(a.text || ''); } catch (_) { /* 무시 */ } }, 300);
+    else setTimeout(() => { checkRecurring(); checkReminders(); }, 350);
     setTimeout(() => checkUpdate(false), 2500);       // 켤 때 새 버전 확인 (설정 → 업데이트에서 끌 수 있음)
   }
 
@@ -615,6 +638,7 @@ const App = (() => {
     st.lid = L.firstLedgerId();
     reloadLedgers();
     go('ledger');
+    widgetNow();
     checkRecurring();
   }
 
@@ -633,7 +657,7 @@ const App = (() => {
   return {
     MOODS, NAV, LAYOUT, st, pref, navIcon, FONTS, layoutOf, variantOf, fontPx, setFontPx, FS_MIN, FS_MAX, checkUpdate, downloadUpdate, askInstall, updState, setUpdAuto, onUpd, setPref, prefJson, applyTheme, theme, isSns, go, back, navOrder, moreKeys, navLabel,
     ledgerLayout, drawNav, navReorderSheet, layoutReorderSheet, COLOR_KEYS, baseColors, customColors, setCustomColor, render, dataChanged, fab, onBack, boot, reloadLedgers,
-    updateHeader, selectLedger, afterReplace, ledgerPicker, nativeAsync, checkRecurring, ledgerName,
+    updateHeader, selectLedger, afterReplace, ledgerPicker, nativeAsync, checkRecurring, ledgerName, onLaunch,
     get lid() { return st.lid; },
     get native() { return N; },
   };

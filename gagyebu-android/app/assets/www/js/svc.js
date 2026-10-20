@@ -98,6 +98,7 @@ const L = (() => {
             'SELECT ?,date,item,income,expense,code,memo,origin FROM entry WHERE ledger_id=? ORDER BY date,id', [lid, copyFrom]);
           DB.run('INSERT INTO budget SELECT ?, ym, code, amount FROM budget WHERE ledger_id=?', [lid, copyFrom]);
           DB.run('INSERT INTO item_word SELECT ?, name, count FROM item_word WHERE ledger_id=?', [lid, copyFrom]);
+          DB.run('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort) SELECT ?,item,income,expense,code,memo,sort FROM favorite WHERE ledger_id=?', [lid, copyFrom]);
           for (const r of DB.q('SELECT * FROM recurring WHERE ledger_id=?', [copyFrom])) {
             const thr = R.processedThrough(r.id);
             DB.run('INSERT INTO recurring(ledger_id,item,income,expense,code,day,start,end,memo,created,applied_through) ' +
@@ -537,6 +538,10 @@ const Rep = (() => {
     if (amount) DB.run('INSERT OR REPLACE INTO budget VALUES(?,?,?,?)', [lid, ymv, code, parseInt(amount, 10)]);
     else DB.run('DELETE FROM budget WHERE ledger_id=? AND ym=? AND code=?', [lid, ymv, code]);
   }
+  /** 여러 달에 같은 예산을 한꺼번에 (예산 정하기). amounts: {계정: 금액} — 0 이면 지움 */
+  function setBudgets(lid, yms, amounts) {
+    DB.tx(() => { for (const v of yms) for (const [code, amount] of Object.entries(amounts)) setBudget(lid, v, code, amount); });
+  }
   function budgetYear(lid, y) {
     const yms = [];
     for (let m = 1; m <= 12; m++) yms.push(U.ym(y, m));
@@ -592,7 +597,7 @@ const Rep = (() => {
     return { labels, series };
   }
 
-  return { sumByCode, incomeExpense, monthly, yearly, daily, custom, budgets, setBudget, budgetYear, graphSeries, settleDay };
+  return { sumByCode, incomeExpense, monthly, yearly, daily, custom, budgets, setBudget, setBudgets, budgetYear, graphSeries, settleDay };
 })();
 
 // ════════════════ 자산 (services/assets.py) ════════════════
@@ -715,13 +720,37 @@ const A = (() => {
         [aid, t.date, t.summary || '', parseInt(t.deposit || 0, 10), parseInt(t.withdraw || 0, 10), t.memo || '', eid]).lastId;
     });
   }
-  const updateTx = (tid, t) => DB.run('UPDATE account_tx SET date=?,summary=?,deposit=?,withdraw=?,memo=? WHERE id=?',
-    [t.date, t.summary || '', parseInt(t.deposit || 0, 10), parseInt(t.withdraw || 0, 10), t.memo || '', tid]);
+  function updateTx(tid, t) {
+    const dep = parseInt(t.deposit || 0, 10), wd = parseInt(t.withdraw || 0, 10);
+    DB.tx(() => {
+      DB.run('UPDATE account_tx SET date=?,summary=?,deposit=?,withdraw=?,memo=? WHERE id=?', [t.date, t.summary || '', dep, wd, t.memo || '', tid]);
+      const r = DB.one('SELECT link_id FROM account_tx WHERE id=?', [tid]);
+      if (r && r.link_id) DB.run('UPDATE account_tx SET date=?,deposit=?,withdraw=?,memo=? WHERE id=?', [t.date, wd, dep, t.memo || '', r.link_id]);   // 이체 짝
+    });
+  }
   function deleteTx(tid, withEntry) {
     DB.tx(() => {
-      const r = DB.one('SELECT entry_id FROM account_tx WHERE id=?', [tid]);
+      const r = DB.one('SELECT entry_id, link_id FROM account_tx WHERE id=?', [tid]);
       if (withEntry && r && r.entry_id) DB.run('DELETE FROM entry WHERE id=?', [r.entry_id]);
+      if (r && r.link_id) DB.run('DELETE FROM account_tx WHERE id=?', [r.link_id]);   // 이체는 짝도 함께
       DB.run('DELETE FROM account_tx WHERE id=?', [tid]);
+    });
+  }
+  /** 자산 간 이체 (1.7.0): 보내는 쪽 출금 + 받는 쪽 입금을 짝으로. 장부 수입·지출로는 세지 않음. 반환 [출금 번호, 입금 번호] */
+  function transfer(fromId, toId, date, amount, memo) {
+    amount = parseInt(amount || 0, 10);
+    if (fromId === toId) throw new Error('보내는 곳과 받는 곳이 같습니다');
+    if (!(amount > 0)) throw new Error('이체 금액을 입력하세요');
+    const names = {};
+    for (const r of DB.q('SELECT id, name FROM account WHERE id IN (?,?)', [fromId, toId])) names[r.id] = r.name;
+    if (Object.keys(names).length !== 2) throw new Error('자산을 찾을 수 없습니다');
+    return DB.tx(() => {
+      const a = DB.run('INSERT INTO account_tx(account_id,date,summary,deposit,withdraw,memo) VALUES(?,?,?,?,?,?)',
+        [fromId, date, `이체 → ${names[toId]}`, 0, amount, memo || '']).lastId;
+      const b = DB.run('INSERT INTO account_tx(account_id,date,summary,deposit,withdraw,memo,link_id) VALUES(?,?,?,?,?,?,?)',
+        [toId, date, `이체 ← ${names[fromId]}`, amount, 0, memo || '', a]).lastId;
+      DB.run('UPDATE account_tx SET link_id=? WHERE id=?', [b, a]);
+      return [a, b];
     });
   }
 
@@ -849,14 +878,15 @@ const A = (() => {
       }
     }
     s.카드 = cardUnpaidTotal();
-    s.자산합계 = s.예금 + s.증권 + s.부동산 + s.기타;
-    s.부채합계 = s.대출 + s.카드 + s.기타부채;
+    [s.받을돈, s.갚을돈] = Goal.debtTotals();             // 빌려준 돈 = 받을 돈(자산), 빌린 돈 = 갚을 돈(부채) (1.7.0)
+    s.자산합계 = s.예금 + s.증권 + s.부동산 + s.기타 + s.받을돈;
+    s.부채합계 = s.대출 + s.카드 + s.기타부채 + s.갚을돈;
     s.순자산 = s.자산합계 - s.부채합계;
     return s;
   }
 
   return { KIND_LABEL, PROPERTY_TYPES, OTHER_ASSET, BILL_MONTHS, FIELDS, CARD_FIELDS, parseExtra, mergeExtra,
-    accounts, saveAccount, deleteAccount, move, accountBalance, accountTxs, addTx, updateTx, deleteTx,
+    accounts, saveAccount, deleteAccount, move, accountBalance, accountTxs, addTx, updateTx, deleteTx, transfer,
     cards, saveCard, deleteCard, billingWindow, payDateFor, addCardPurchase, deleteCardGroup, cardTxs,
     cardUnpaidTotal, payCard, unpayCard, summary };
 })();

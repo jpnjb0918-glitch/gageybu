@@ -47,6 +47,69 @@ def parse_money(s):
     return v
 
 
+def calc_money(s):
+    """금액 칸 계산기: '12000+3500', '45,000/3', '(1200+800)*2', '2만 3천' 은 아님 — 숫자와 + - * / × ÷ ( ) 만.
+    결과는 원 단위로 반올림(0.5 는 0 에서 먼 쪽). 식이 아니면 parse_money 와 같음. 잘못된 식은 ValueError.
+    안드로이드판 util.js calcMoney 와 같은 규칙"""
+    t = re.sub(r'[,\s원₩]', '', str(s or '')).replace('×', '*').replace('÷', '/').replace('x', '*').replace('X', '*')
+    if not re.search(r'\d[-+*/]|[)*/(]', t):
+        return parse_money(t)
+    toks = re.findall(r'\d+(?:\.\d+)?|[-+*/()]', t)
+    if ''.join(toks) != t:
+        raise ValueError(f'계산할 수 없는 식입니다: {s!r}')
+    pos = 0
+
+    def peek():
+        return toks[pos] if pos < len(toks) else None
+
+    def take():
+        nonlocal pos
+        pos += 1
+        return toks[pos - 1]
+
+    def expr():
+        v = term()
+        while peek() in ('+', '-'):
+            v = v + term() if take() == '+' else v - term()
+        return v
+
+    def term():
+        v = factor()
+        while peek() in ('*', '/'):
+            op = take()
+            r = factor()
+            if op == '/' and r == 0:
+                raise ValueError('0으로 나눌 수 없습니다')
+            v = v * r if op == '*' else v / r
+        return v
+
+    def factor():
+        tok = peek()
+        if tok in ('+', '-'):
+            take()
+            return factor() if tok == '+' else -factor()
+        if tok == '(':
+            take()
+            v = expr()
+            if take() != ')':
+                raise ValueError('괄호가 맞지 않습니다')
+            return v
+        if tok is None or not tok[0].isdigit():
+            raise ValueError('계산할 수 없는 식입니다')
+        return float(take())
+
+    try:
+        v = expr()
+    except (IndexError, TypeError):
+        raise ValueError(f'계산할 수 없는 식입니다: {s!r}') from None
+    if pos != len(toks):
+        raise ValueError(f'계산할 수 없는 식입니다: {s!r}')
+    v = int(abs(v) + 0.5 + 1e-9) * (1 if v >= 0 else -1)
+    if abs(v) >= MONEY_LIMIT:
+        raise ValueError('금액이 너무 큽니다')
+    return v
+
+
 def today():
     return dt.date.today()
 

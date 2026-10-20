@@ -2,8 +2,8 @@
 'use strict';
 Pages.report = (() => {
   const t = U.parts(U.today());
-  const s = { kind: 'monthly', y: t[0], m: t[1], start: U.iso(t[0], t[1], 1), end: U.today() };
-  const KINDS = [['monthly', '월결산'], ['yearly', '년결산'], ['daily', '일일'], ['custom', '기간'], ['budget', '예산']];
+  const s = { kind: 'monthly', y: t[0], m: t[1], start: U.iso(t[0], t[1], 1), end: U.today(), tagAll: true };
+  const KINDS = [['monthly', '월결산'], ['yearly', '년결산'], ['daily', '일일'], ['custom', '기간'], ['budget', '예산'], ['insight', '리포트'], ['tags', '태그']];
 
   function render(c, p, tools) {
     const lid = App.lid;
@@ -12,7 +12,17 @@ Pages.report = (() => {
     sdBtn.onclick = () => UI.formSheet({ title: '결산일', fields: [{ k: 'sd', label: '결산일 (1~31)', type: 'int', hint: '5일이면 5일~다음달 4일을 한 달로 셉니다 (월급날 기준 등)' }],
       values: { sd }, onSave: v => { if (!v.sd || v.sd < 1 || v.sd > 31) throw new Error('1~31 사이로 입력하세요.'); DB.setMeta('settle_day', v.sd); App.dataChanged(); } });
     tools.appendChild(sdBtn);
-    c.appendChild(UI.seg(KINDS, s.kind, k => { s.kind = k; App.render(); }));
+    c.appendChild(UI.seg(KINDS, s.kind, k => {
+      if (k === 'insight' && s.kind !== 'insight') [s.y, s.m] = Ins.periodOf(U.today(), sd);    // 처음엔 오늘이 든 달 (결산일 기준)
+      s.kind = k;
+      App.render();
+    }));
+    if (s.kind === 'insight') {
+      c.appendChild(UI.monthNav(s.y, s.m, (y, m) => { s.y = y; s.m = m; App.render(true); }));
+      c.appendChild(UI.el(Extra.insightHtml(lid, s.y, s.m)));
+      return;
+    }
+    if (s.kind === 'tags') { Extra.tagsView(c, lid, s, () => App.render(true)); return; }
     let rep;
     if (s.kind === 'monthly' || s.kind === 'daily') {
       c.appendChild(UI.monthNav(s.y, s.m, (y, m) => { s.y = y; s.m = m; App.render(true); }));
@@ -79,7 +89,9 @@ Pages.report = (() => {
       body: rows.length ? `<ul class="list">${rows.map(x => Entry.rowHtml(x, null, true, cmap)).join('')}</ul>` : UI.empty('내역이 없어요') });
     UI.on(sh.body, 'li[data-id]', 'click', (e, li) => { sh.close(); Entry.open({ entry: rows.find(x => x.id === Number(li.dataset.id)) }); });
   }
-  return { title: '결산 보고서', sticker: 'b30', sub: '한 달 성적표 두근두근', render };
+  /** 이달 리포트로 바로 (가계부 화면의 예산 막대에서) */
+  function openInsight(y, m) { s.kind = 'insight'; s.y = y; s.m = m; App.go('report', {}, true); }
+  return { title: '결산 보고서', sticker: 'b30', sub: '한 달 성적표 두근두근', render, openInsight };
 })();
 
 // ════════ 그래프 ════════

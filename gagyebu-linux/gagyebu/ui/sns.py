@@ -132,6 +132,20 @@ def _wrap(fm, text, width, max_lines):
     return out
 
 
+def signed(v, sign):
+    """지출은 -1,000 / 수입은 +1,000. 음수 지출(환불·승인 취소)은 +, 음수 수입은 − (예전엔 '--4,500' 처럼 나왔음)"""
+    if v < 0:
+        sign = '+' if sign == '-' else '-'
+    return sign + fmt_money(abs(v))
+
+
+def _sign_text(t, sign):
+    """표 칸 글자('1,000' 또는 '-1,000')에 부호 붙이기 — signed 와 같은 규칙"""
+    if t.startswith('-'):
+        return ('+' if sign == '-' else '-') + t[1:]
+    return sign + t
+
+
 class LedgerDelegate(QStyledItemDelegate):
     """theme: SNS 테마 이름 (피드·타임라인 × 미니홈피 색·밝게·어둡게). 모양은 T.layout_of 로"""
     HEAD = 36           # 타임라인 날짜 띠 높이
@@ -144,6 +158,11 @@ class LedgerDelegate(QStyledItemDelegate):
         self.ledger_name = ''
         self.minimi = T.DEFAULT_MINIMI
         self.hits = {}            # 줄 번호 → [(QRectF, 할 일, 날짜/값)] (그릴 때 채움)
+        self.photos = {}          # 내역 번호 → 사진 수 (사진기 표시)
+
+    def _has_photo(self, row):
+        it = self.table.item(row, 0)
+        return bool(self.photos) and it is not None and it.data(Qt.ItemDataRole.UserRole) in self.photos
 
     @property
     def feed(self):
@@ -272,9 +291,9 @@ class LedgerDelegate(QStyledItemDelegate):
             xx = x0 + 10
             parts = []
             if exp:
-                parts += [('지출 ', c['ink']), (f'-{fmt_money(exp)}', c['out'])]
+                parts += [('지출 ', c['ink']), (signed(exp, '-'), c['out'])]
             if inc:
-                parts += [(' · ' if exp else '', c['ink']), ('수입 ', c['ink']), (f'+{fmt_money(inc)}', c['in'])]
+                parts += [(' · ' if exp else '', c['ink']), ('수입 ', c['ink']), (signed(inc, '+'), c['in'])]
             fm = QFontMetrics(fb)
             for t, col in parts:
                 if not t:
@@ -304,10 +323,14 @@ class LedgerDelegate(QStyledItemDelegate):
         iw = min(fmb.horizontalAdvance(item), avail * 0.72)
         p.setPen(QColor(c['ink']))
         _elide(p, QRectF(line.left() + 6, line.top(), iw, line.height()), item)
+        cam = 0
+        if self._has_photo(row):        # 사진 붙은 내역
+            cam = 18
+            I.paint(p, QRectF(line.left() + 10 + iw, line.top() + (line.height() - 15) / 2, 15, 15), 'camera', c['muted'])
         sub = ' · '.join(x for x in (self._text(row, C_CODE), self._text(row, C_MEMO).replace('\n', ' ')) if x)
         p.setFont(base)
         p.setPen(QColor(c['muted']))
-        _elide(p, QRectF(line.left() + 12 + iw, line.top(), avail - iw - 6, line.height()), sub)
+        _elide(p, QRectF(line.left() + 12 + iw + cam, line.top(), avail - iw - 6 - cam, line.height()), sub)
         y += lh + 10
         if self.last_of_day(row):
             p.setFont(fs)
@@ -344,7 +367,7 @@ class LedgerDelegate(QStyledItemDelegate):
         big.setPixelSize(30)
         big.setBold(True)
         inc, exp, n = day.get('inc', 0), day.get('exp', 0), day.get('n', 1)
-        txt = f'-{fmt_money(exp)}' if exp else f'+{fmt_money(inc)}'
+        txt = signed(exp, '-') if exp else signed(inc, '+')
         tx = QRectF(r.left() + 18, r.top(), r.width() - 110, r.height())
         fmb = QFontMetrics(big)
         cy = r.center().y() - 14
@@ -390,9 +413,9 @@ class LedgerDelegate(QStyledItemDelegate):
         out = []
         inc, exp = self._text(row, C_IN), self._text(row, C_OUT)
         if inc:
-            out.append(('+' + inc, 'in'))
+            out.append((_sign_text(inc, '+'), 'in'))
         if exp:
-            out.append(('-' + exp, 'out'))
+            out.append((_sign_text(exp, '-'), 'out'))
         return out
 
     def _paint_tweet(self, p, rect, row, c, selected):
@@ -414,8 +437,8 @@ class LedgerDelegate(QStyledItemDelegate):
                 xr -= 30
             p.setFont(base)
             fm = QFontMetrics(base)
-            for t, col in ((f"-{fmt_money(day.get('exp', 0))}" if day.get('exp') else '', c['out']),
-                           (f"+{fmt_money(day.get('inc', 0))}" if day.get('inc') else '', c['in'])):
+            for t, col in ((signed(day.get('exp', 0), '-') if day.get('exp') else '', c['out']),
+                           (signed(day.get('inc', 0), '+') if day.get('inc') else '', c['in'])):
                 if t:
                     tw = fm.horizontalAdvance(t)
                     p.setPen(QColor(col))
@@ -438,9 +461,13 @@ class LedgerDelegate(QStyledItemDelegate):
         p.setFont(fb)
         p.setPen(QColor(c['ink']))
         _elide(p, QRectF(cx, yy, iw, fmb.height()), item)
+        cam = 0
+        if self._has_photo(row):        # 사진 붙은 내역
+            cam = 19
+            I.paint(p, QRectF(cx + iw + 5, yy + (fmb.height() - 15) / 2, 15, 15), 'camera', c['muted'])
         p.setFont(base)
         p.setPen(QColor(c['muted']))
-        _elide(p, QRectF(cx + iw + 6, yy, cw - iw - 6, fmb.height()), f"@{code.replace(' ', '')} · {_short(date)}")
+        _elide(p, QRectF(cx + iw + 6 + cam, yy, cw - iw - 6 - cam, fmb.height()), f"@{code.replace(' ', '')} · {_short(date)}")
         yy += fmb.height() + 2
         memo = self._text(row, C_MEMO)
         if memo:

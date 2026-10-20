@@ -21,6 +21,14 @@ from gagyebu.services import ledger as L                           # noqa: E402
 from gagyebu.services import order as O                            # noqa: E402
 from gagyebu.services import recurring as R                        # noqa: E402
 from gagyebu.services import reports as RP                         # noqa: E402
+from gagyebu.services import attach as AT                          # noqa: E402
+from gagyebu.services import goals as G                            # noqa: E402
+from gagyebu.services import insights as INS                       # noqa: E402
+from gagyebu.services import smsparse as SMS                       # noqa: E402
+
+SMS_SAMPLE = "[Web발신]\n신한카드(1234)승인 홍*동 12,500원(일시불)10/19 12:34 스타벅스 누적1,234,567원\n[Web발신]\nKB국민카드1234승인\n홍*동님\n45,000원 일시불\n10/18 19:02\n교촌치킨\n누적1,279,567원\n[Web발신]\n삼성1234승인 홍*동\n120,000원 03개월\n10/17 15:20 이마트 성수점\n누적1,399,567원\n[Web발신]\n현대카드 M 승인\n홍*동\n8,900원 일시불\n10/16 08:10\nGS25 역삼점\n누적1,408,467원\n[Web발신]\n롯데카드 2*7*승인취소 홍*동 12,500원 일시불 10/19 13:00 스타벅스\n[Web발신]\n[KB]10/15 09:00\n123-***-456\n홍길동\n입금\n3,200,000\n잔액5,000,000\n[Web발신]\n우리(1234)승인\n홍*동님\n6,000원 일시불\n10/14 21:45\n쿠팡이츠\n누적123,000원\n[Web발신]\n하나(1*2*)승인 홍*동님 23,400원 일시불 10/13 18:30 올리브영 누적1,234,567원\n[Web발신]\nNH농협카드(1234)승인 홍*동 4,500원 일시불 01/03 07:55 메가커피 총누적1,234,567원\n[카카오뱅크] 홍*동(1234) 10/12 11:20 출금 15,000원 배달의민족 잔액 123,456원\n"
+GUESS_ITEMS = [['스타벅스 강남점', False], ['메가박스 코엑스', False], ['쿠팡이츠', False], ['쿠팡', False], ['GS25 역삼점', False], ['이마트 성수점', False], ['KTX 서울', False], ['SKT 요금', False], ['넷플릭스', False], ['기차표', False], ['아무가게', False], ['홍길동', True], ['한전', False]]
+CALC_SAMPLES = ["12000+3500", "45,000/3", "(1200+800)*2", "1,000", "", "-500", "10000-2500*2", "7/2", "5/2", "-5/2", "3×4", "12÷5", "1e3", "2*(3", "10/0", "1.5*3", "0.1*3"]
 
 TODAY = dt.date(2026, 10, 16)
 D = dt.date
@@ -112,6 +120,32 @@ def build(path):
     O.set_list_order(con, 'diary', dids[::-1])
     mids = [r['id'] for r in C.simple_list(con, 'memo', 'sort, id')]
     O.set_memo_order(con, [mids[2], mids[0], mids[1]])
+    # 1.7.0: 자주 쓰는 내역·태그·이체·저축 목표·빌려준 돈·사진
+    f1 = L.save_favorite(con, lid, {'item': '지하철', 'expense': 1500, 'code': '40'})
+    L.save_favorite(con, lid, {'item': '점심', 'expense': 9000, 'code': '31', 'memo': '#회사'})
+    L.save_favorite(con, lid, {'item': '용돈', 'income': 50000, 'code': '01'})
+    L.move_favorite(con, lid, f1, 1)
+    add(D(2026, 10, 14), '기차표', exp=59800, code='40', memo='#여행 #부산')
+    add(D(2026, 10, 15), '숙소', exp=120000, code='80', memo='#여행')
+    add(D(2026, 9, 15), '회식', exp=30000, code='31', memo='#회사 #여행지')
+    add(D(2026, 10, 16), '김장 재료', exp=250000, code='30')
+    add(D(2026, 10, 16), '송별회', exp=180000, code='31', memo='#회사')
+    t1, t2 = A.transfer(con, b1, b2, D(2026, 10, 12), 200000, '비상금')
+    A.transfer(con, b2, b1, D(2026, 10, 13), 50000)
+    A.update_tx(con, t2, {'date': D(2026, 10, 12), 'summary': '이체 ← 월급통장', 'deposit': 180000, 'withdraw': 0, 'memo': '고침'})
+    g1 = G.save_goal(con, {'name': '여행 자금', 'target': 1200000, 'due': D(2027, 3, 31)})
+    G.add_goal_tx(con, g1, D(2026, 9, 25), 300000)
+    G.add_goal_tx(con, g1, D(2026, 10, 10), 150000)
+    G.save_goal(con, {'name': '비상금', 'target': 0})
+    d1 = G.save_debt(con, {'kind': 'lend', 'person': '철수', 'amount': 50000, 'date': D(2026, 10, 1), 'due': D(2026, 11, 1)})
+    G.add_payment(con, d1, D(2026, 10, 5), 20000)
+    d2 = G.save_debt(con, {'kind': 'borrow', 'person': '영희', 'amount': 30000, 'date': D(2026, 10, 2)})
+    G.add_payment(con, d2, D(2026, 10, 9), 30000)
+    G.save_debt(con, {'kind': 'borrow', 'person': '민수', 'amount': 70000, 'date': D(2026, 10, 3), 'memo': '책값'})
+    e1 = con.execute("SELECT id FROM entry WHERE item='숙소'").fetchone()[0]
+    AT.add(con, e1, b'\xff\xd8\xff\x00', 'receipt.jpg')
+    AT.add(con, e1, b'\xff\xd8\xff\x01', 'receipt2.jpg')
+    RP.set_budgets(con, lid, ['2026-11', '2026-12'], {'30': 300000, '31': 0, '40': 50000})
     db.set_meta(con, 'settle_day', 25)
     db.set_meta(con, 'password', util.hash_password('1111'))
     con.commit()
@@ -172,11 +206,42 @@ def dump(path, out):
         due, later = R.pending(con, lid, TODAY)
         res[k + '.pending'] = [[[x['rule']['id'], x['date'].isoformat()] for x in due], [[x['rule']['id'], x['date'].isoformat()] for x in later]]
         res[k + '.rules'] = _j(R.rules(con, lid))
+        res[k + '.fav'] = _j(L.favorites(con, lid))
+        res[k + '.tags'] = L.tag_summary(con, lid)
+        res[k + '.tags_oct'] = L.tag_summary(con, lid, D(2026, 10, 1), D(2026, 10, 31))
+        res[k + '.tag_travel'] = [r['id'] for r in L.entries_with_tag(con, lid, '여행')]
+        for sd in (1, 25):
+            for y, m in [(2026, 10), (2026, 9), (2026, 11)]:
+                res[f'{k}.bprog.{y}.{m}.{sd}'] = INS.budget_progress(con, lid, y, m, sd, TODAY)
+                res[f'{k}.insight.{y}.{m}.{sd}'] = INS.month_insight(con, lid, y, m, sd, TODAY)
+            res[f'{k}.codespent.{sd}'] = [INS.code_spent(con, lid, c, d, sd) for c in ('30', '31', '40') for d in (D(2026, 10, 1), D(2026, 10, 24), D(2026, 10, 25))]
+            res[f'{k}.alert.{sd}'] = [INS.budget_alert(con, lid, c, D(2026, 10, 16), b, sd) for c in ('30', '31') for b in (0, 100000, 130000, 330000, 400000)]
+        res[k + '.nospend'] = INS.no_spend_days(con, lid, D(2026, 9, 25), D(2026, 10, 16))
+        res[k + '.streak'] = [INS.no_spend_streak(con, lid, d) for d in (D(2026, 10, 16), D(2026, 10, 11), D(2026, 10, 9))]
     res['order.contact'] = [r['id'] for r in O.apply_list_order(con, 'contact', C.simple_list(con, 'contact', 'name'))]
     res['order.contact.grp'] = [r['id'] for r in O.apply_list_order(con, 'contact', C.simple_list(con, 'contact', 'name', 'grp=?', ('친구',)))]
     res['order.diary'] = [r['id'] for r in O.apply_list_order(con, 'diary', C.simple_list(con, 'diary', 'date DESC, id DESC'))]
     res['order.memo'] = [r['id'] for r in C.simple_list(con, 'memo', 'sort, id')]
     res['assets.summary'] = A.summary(con)
+    res['goals'] = [[_j(g), G.goal_status(con, g, TODAY), _j(G.goal_txs(con, g['id']))] for g in G.goals(con)]
+    res['debts'] = [[_j(d), G.debt_paid(con, d['id']), G.debt_left(con, d), _j(G.payments(con, d['id']))] for d in G.debts(con)]
+    res['debts.open'] = [d['id'] for d in G.debts(con, include_done=False)]
+    res['debt.totals'] = list(G.debt_totals(con))
+    eids = [r[0] for r in con.execute('SELECT id FROM entry ORDER BY id')]
+    res['att.counts'] = {str(k): v for k, v in AT.counts(con, eids).items()}
+    res['att.list'] = [[_j(x) for x in AT.list_for(con, e)] for e in sorted(AT.counts(con, eids))]
+    res['sms'] = SMS.parse(SMS_SAMPLE, D(2026, 10, 20))
+    res['sms.entries'] = [SMS.to_entry(x) for x in res['sms']]
+    res['sms.jan'] = SMS.parse('[Web발신]\n신한카드(1234)승인 홍*동 9,900원(일시불)12/30 23:59 넷플릭스', D(2027, 1, 2))
+    calc = []
+    for t in CALC_SAMPLES:
+        try:
+            calc.append(util.calc_money(t))
+        except ValueError:
+            calc.append('ERR')
+    res['calc'] = calc
+    lid1 = L.first_ledger_id(con)
+    res['guess'] = [SMS.guess_code(con, lid1, it, inc) for it, inc in GUESS_ITEMS]
     for a in A.accounts(con):
         res[f'acct.{a["id"]}'] = [[r['id'], b] for r, b in A.account_txs(con, a['id'])]
         res[f'acct.{a["id"]}.bal'] = A.account_balance(con, a['id'])

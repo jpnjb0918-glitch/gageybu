@@ -182,6 +182,18 @@ def set_budget(con, lid, ym, code, amount):
     con.commit()
 
 
+def set_budgets(con, lid, yms, amounts):
+    """여러 달에 같은 예산을 한꺼번에 (예산 정하기 창). amounts: {계정: 금액} — 0 이면 그 달 예산을 지움"""
+    for ym in yms:
+        for code, amount in amounts.items():
+            if amount:
+                con.execute('INSERT INTO budget VALUES(?,?,?,?) ON CONFLICT(ledger_id,ym,code) DO UPDATE SET amount=excluded.amount',
+                            (lid, ym, code, int(amount)))
+            else:
+                con.execute('DELETE FROM budget WHERE ledger_id=? AND ym=? AND code=?', (lid, ym, code))
+    con.commit()
+
+
 def budget_year(con, lid, y):
     yms = [f'{y:04d}-{m:02d}' for m in range(1, 13)]
     bs = [budgets(con, lid, ym) for ym in yms]

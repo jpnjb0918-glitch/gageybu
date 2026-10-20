@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboB
 
 from ..services import ledger as L
 from ..services.backup import write_csv
-from ..util import fmt_money, parse_money
+from ..util import calc_money, fmt_money
 
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 CENTER = Qt.AlignmentFlag.AlignCenter
@@ -56,21 +56,23 @@ def set_tone(label, kind=''):
 
 # ── 입력 위젯 ───────────────────────────────────────────
 class MoneyEdit(QLineEdit):
+    """금액 칸. '12000+3500', '45,000/3', '(1200+800)*2' 같은 계산식도 됨 — 칸을 벗어나면 계산한 값으로 바뀜"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(RIGHT)
         self.setPlaceholderText('0')
+        self.setToolTip('계산식도 됩니다: 12000+3500, 45000/3, (1200+800)*2')
         self.editingFinished.connect(self._fmt)
 
     def _fmt(self):
         try:
-            v = parse_money(self.text())
+            v = calc_money(self.text())
             self.setText(fmt_money(v) if v else '')
         except ValueError:
             pass
 
     def value(self):
-        return parse_money(self.text())
+        return calc_money(self.text())
 
     def set_value(self, v):
         self.setText(fmt_money(v) if v else '')

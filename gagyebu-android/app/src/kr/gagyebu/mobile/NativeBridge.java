@@ -45,6 +45,9 @@ import java.util.Map;
  */
 public class NativeBridge {
     private static final int REQ_EXPORT_DB = 101, REQ_IMPORT_DB = 102, REQ_SAVE_TEXT = 103, REQ_OPEN_TEXT = 104;
+    private static final int REQ_PICK_PHOTO = 105, REQ_CAPTURE = 106;
+    private static final int PHOTO_SIDE = 1600, PHOTO_QUALITY = 82;   // PC판 services/attach.py 와 같음
+    private static final int MAX_PHOTO = 8 * 1024 * 1024;
     private static final String DB_NAME = "gagyebu.sqlite3";
     private static final long MAX_TEXT = 20L * 1024 * 1024;       // CSV 등 글 파일 최대 20MB
     private static final long MAX_DB = 512L * 1024 * 1024;        // 자료 파일 최대 512MB
@@ -726,7 +729,8 @@ public class NativeBridge {
     }
 
     void onActivityResult(final int req, int resultCode, Intent data) {
-        if (req != REQ_EXPORT_DB && req != REQ_IMPORT_DB && req != REQ_SAVE_TEXT && req != REQ_OPEN_TEXT) {
+        if (req != REQ_EXPORT_DB && req != REQ_IMPORT_DB && req != REQ_SAVE_TEXT && req != REQ_OPEN_TEXT
+                && req != REQ_PICK_PHOTO && req != REQ_CAPTURE) {
             return;
         }
         final String cb;
@@ -739,6 +743,23 @@ public class NativeBridge {
         }
         if (cb == null) {
             // 앱이 다시 시작되어 요청 내용(저장할 글 등)을 잃은 경우: 아무것도 하지 않음 (빈 파일 저장·화면 모르게 자료 교체 방지)
+            return;
+        }
+        if (req == REQ_CAPTURE && resultCode == Activity.RESULT_OK) {      // 찍은 사진은 우리가 준 곳에 (data 없음)
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    JSONObject res;
+                    try {
+                        res = photoFrom(CaptureProvider.file(act), "사진.jpg");
+                    } catch (Throwable e) {
+                        res = errObj(e.getMessage() == null ? e.toString() : e.getMessage());
+                    } finally {
+                        CaptureProvider.file(act).delete();
+                    }
+                    callback(cb, res);
+                }
+            }).start();
             return;
         }
         if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) {
@@ -762,6 +783,8 @@ public class NativeBridge {
                         res = doImport(uri);
                     } else if (req == REQ_SAVE_TEXT) {
                         res = doSaveText(uri, text == null ? "" : text);
+                    } else if (req == REQ_PICK_PHOTO) {
+                        res = doPickPhoto(uri);
                     } else {
                         res = doOpenText(uri);
                     }
@@ -771,6 +794,200 @@ public class NativeBridge {
                 callback(cb, res);
             }
         }).start();
+    }
+
+    // ── 내역 사진 (영수증) ───────────────────────────────
+    /** 사진 고르기(camera=false: 앨범·파일) 또는 찍기(camera=true). 결과: {"ok":true,"b64":JPEG,"name","size"} */
+    @JavascriptInterface
+    public void pickPhoto(final boolean camera, final String cb) {
+        startPicker(cb, null, new Runnable() {
+            @Override
+            public void run() {
+                if (camera) {
+                    File f = CaptureProvider.file(act);
+                    File dir = f.getParentFile();
+                    if (dir != null) {
+                        dir.mkdirs();
+                    }
+                    f.delete();
+                    Uri out = CaptureProvider.uri();
+                    Intent it = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+                    it.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, out);
+                    it.setClipData(android.content.ClipData.newRawUri("photo", out));
+                    it.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    act.startActivityForResult(it, REQ_CAPTURE);
+                } else {
+                    Intent it = new Intent(Intent.ACTION_GET_CONTENT);
+                    it.addCategory(Intent.CATEGORY_OPENABLE);
+                    it.setType("image/*");
+                    act.startActivityForResult(Intent.createChooser(it, "사진 고르기"), REQ_PICK_PHOTO);
+                }
+            }
+        });
+    }
+
+    private JSONObject doPickPhoto(Uri uri) throws Exception {
+        File tmp = File.createTempFile("photo", ".img", act.getCacheDir());
+        try {
+            InputStream in = act.getContentResolver().openInputStream(uri);
+            if (in == null) {
+                throw new IllegalStateException("사진을 열 수 없습니다.");
+            }
+            copy(in, new FileOutputStream(tmp));
+            String name = "사진.jpg";
+            Cursor c = null;
+            try {
+                c = act.getContentResolver().query(uri, new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null);
+                if (c != null && c.moveToFirst() && !c.isNull(0)) {
+                    name = c.getString(0).replaceAll("\\.[A-Za-z0-9]{1,5}$", "") + ".jpg";
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (c != null) {
+                    c.close();
+                }
+            }
+            return photoFrom(tmp, name);
+        } finally {
+            tmp.delete();
+        }
+    }
+
+    /** 사진 파일 → 긴 변 1600px·JPEG 82 (회전 정보대로 바로 세움, 투명은 흰 바탕) */
+    private static JSONObject photoFrom(File src, String name) throws Exception {
+        if (!src.isFile() || src.length() == 0) {
+            throw new IllegalStateException("사진을 받지 못했습니다.");
+        }
+        android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeFile(src.getPath(), o);
+        if (o.outWidth <= 0 || o.outHeight <= 0) {
+            throw new IllegalArgumentException("사진을 읽을 수 없습니다. JPG·PNG 사진을 골라 주세요.");
+        }
+        int side = Math.max(o.outWidth, o.outHeight), sample = 1;
+        while (side / (sample * 2) >= PHOTO_SIDE) {
+            sample *= 2;
+        }
+        android.graphics.BitmapFactory.Options o2 = new android.graphics.BitmapFactory.Options();
+        o2.inSampleSize = sample;
+        android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeFile(src.getPath(), o2);
+        if (bm == null) {
+            throw new IllegalArgumentException("사진을 읽을 수 없습니다.");
+        }
+        int w = bm.getWidth(), h = bm.getHeight();
+        float sc = Math.min(1f, (float) PHOTO_SIDE / Math.max(w, h));
+        android.graphics.Matrix mx = new android.graphics.Matrix();
+        if (sc < 1f) {
+            mx.postScale(sc, sc);
+        }
+        int rot = 0;
+        try {
+            int or = new android.media.ExifInterface(src.getPath()).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION,
+                    android.media.ExifInterface.ORIENTATION_NORMAL);
+            rot = or == android.media.ExifInterface.ORIENTATION_ROTATE_90 ? 90
+                    : or == android.media.ExifInterface.ORIENTATION_ROTATE_180 ? 180
+                    : or == android.media.ExifInterface.ORIENTATION_ROTATE_270 ? 270 : 0;
+        } catch (Exception ignored) {
+            rot = 0;
+        }
+        if (rot != 0) {
+            mx.postRotate(rot);
+        }
+        if (!mx.isIdentity()) {
+            android.graphics.Bitmap b2 = android.graphics.Bitmap.createBitmap(bm, 0, 0, w, h, mx, true);
+            if (b2 != bm) {
+                bm.recycle();
+            }
+            bm = b2;
+        }
+        if (bm.hasAlpha()) {
+            android.graphics.Bitmap b3 = android.graphics.Bitmap.createBitmap(bm.getWidth(), bm.getHeight(), android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cv = new android.graphics.Canvas(b3);
+            cv.drawColor(android.graphics.Color.WHITE);
+            cv.drawBitmap(bm, 0, 0, null);
+            bm.recycle();
+            bm = b3;
+        }
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, PHOTO_QUALITY, bo);
+        bm.recycle();
+        byte[] jpg = bo.toByteArray();
+        JSONObject r = ok();
+        r.put("b64", android.util.Base64.encodeToString(jpg, android.util.Base64.NO_WRAP));
+        r.put("name", name);
+        r.put("size", jpg.length);
+        return r;
+    }
+
+    /** 사진을 내역에 붙임. 결과: {"ok":true,"id":번호} */
+    @JavascriptInterface
+    public synchronized String addAttachment(long entryId, String b64, String name) {
+        try {
+            needDb();
+            byte[] data = android.util.Base64.decode(b64 == null ? "" : b64, android.util.Base64.DEFAULT);
+            if (data.length == 0 || data.length > MAX_PHOTO) {
+                throw new IllegalArgumentException("사진이 비었거나 너무 큽니다.");
+            }
+            SQLiteStatement st = db.compileStatement("INSERT INTO attachment(entry_id,name,mime,data,created) VALUES(?,?,?,?,?)");
+            try {
+                st.bindLong(1, entryId);
+                st.bindString(2, name == null ? "" : name);
+                st.bindString(3, "image/jpeg");
+                st.bindBlob(4, data);
+                st.bindString(5, new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT).format(new Date()));
+                return ok().put("id", st.executeInsert()).toString();
+            } finally {
+                st.close();
+            }
+        } catch (Throwable e) {
+            return err(e);
+        }
+    }
+
+    /** 사진 내용. 결과: {"ok":true,"b64":...} */
+    @JavascriptInterface
+    public synchronized String attachmentData(long id) {
+        Cursor c = null;
+        try {
+            needDb();
+            c = db.rawQuery("SELECT data FROM attachment WHERE id=?", new String[]{String.valueOf(id)});
+            if (!c.moveToFirst()) {
+                throw new IllegalArgumentException("사진이 없습니다.");
+            }
+            return ok().put("b64", android.util.Base64.encodeToString(c.getBlob(0), android.util.Base64.NO_WRAP)).toString();
+        } catch (Throwable e) {
+            return err(e);
+        } finally {
+            if (c != null) {
+                c.close();
+            }
+        }
+    }
+
+    // ── 홈 화면 위젯·밖에서 들어온 부탁 ──────────────────
+    /** 내역이 바뀌면 홈 화면 위젯을 새로 그림 (다른 스레드에서, 화면을 붙잡지 않게) */
+    @JavascriptInterface
+    public void widgetRefresh() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                GagyebuWidget.refreshAll(act);
+            }
+        }).start();
+    }
+
+    private String launch;          // {"action":"new"} 또는 {"action":"sms","text":...}
+
+    synchronized void setLaunch(String json) {
+        launch = json;
+    }
+
+    /** 위젯의 [＋ 입력]·문자 공유로 열렸으면 그 부탁을 한 번 돌려줌 (없으면 "") */
+    @JavascriptInterface
+    public synchronized String takeLaunchAction() {
+        String l = launch;
+        launch = null;
+        return l == null ? "" : l;
     }
 
     /** "wt"(비우고 쓰기)를 먼저 쓰고, 지원하지 않는 곳이면 "w" */

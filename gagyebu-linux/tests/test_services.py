@@ -16,6 +16,10 @@ from gagyebu.services import importer as I                         # noqa: E402
 from gagyebu.services import ledger as L                           # noqa: E402
 from gagyebu.services import recurring as R                        # noqa: E402
 from gagyebu.services import reports as RP                         # noqa: E402
+from gagyebu.services import attach as AT                          # noqa: E402
+from gagyebu.services import goals as G                            # noqa: E402
+from gagyebu.services import insights as INS                       # noqa: E402
+from gagyebu.services import smsparse as SMS                       # noqa: E402
 
 D = dt.date
 
@@ -399,6 +403,102 @@ class TestReviewRegressions(Base):
                 util.parse_money(bad)
         self.assertEqual(util.parse_money('2.5'), 3)
         self.assertEqual(util.parse_money('-1,500원'), -1500)
+
+
+class TestBenchmark170(Base):
+    """1.7.0 기능: 계산기·문자·자주 쓰는 내역·태그·예산 알림·리포트·무지출·이체·목표·빌린 돈·사진"""
+
+    def test_calc_money(self):
+        for t, v in [('12000+3500', 15500), ('45,000/3', 15000), ('(1200+800)*2', 4000), ('3×4', 12), ('12÷5', 2),
+                     ('7/2', 4), ('-5/2', -3), ('1,000', 1000), ('', 0), ('10000-2500*2', 5000)]:
+            self.assertEqual(util.calc_money(t), v, t)
+        for t in ('10/0', '2*(3', '1+', 'abc'):
+            with self.assertRaises(ValueError):
+                util.calc_money(t)
+
+    def test_sms(self):
+        txt = ('[Web발신]\n신한카드(1234)승인\n홍*동님\n12,500원 일시불\n10/19 08:41\n스타벅스\n누적 345,600원\n\n'
+               '[Web발신]\n롯데카드 승인취소 홍*동 12,500원 10/19 09:10 스타벅스\n\n'
+               '[Web발신]\n삼성카드 홍*동 120,000원 03개월 10/17 18:20 이마트 누적1,000,000원')
+        r = SMS.parse(txt, D(2026, 10, 20))
+        self.assertEqual([(x['date'], x['amount'], x['kind'], x['item']) for x in r],
+                         [('2026-10-19', 12500, 'out', '스타벅스'), ('2026-10-19', 12500, 'cancel', '스타벅스'),
+                          ('2026-10-17', 120000, 'out', '이마트')])
+        self.assertEqual(r[2]['months'], 3)
+        e = SMS.to_entry(r[1])
+        self.assertEqual((e['expense'], e['item']), (-12500, '스타벅스 (취소)'))
+        # 연초에 작년 12월 문자
+        self.assertEqual(SMS.parse('KB국민카드 9,900원 12/30 23:59 넷플릭스', D(2027, 1, 2))[0]['date'], '2026-12-30')
+        self.assertFalse(SMS.parse('안녕하세요', D(2026, 10, 20))[0]['ok'])
+
+    def test_favorites_and_tags(self):
+        a = L.save_favorite(self.con, self.lid, {'item': '지하철', 'expense': 1500, 'code': '40'})
+        b = L.save_favorite(self.con, self.lid, {'item': '점심', 'expense': 9000, 'code': '31'})
+        L.move_favorite(self.con, self.lid, b, -1)
+        self.assertEqual([f['id'] for f in L.favorites(self.con, self.lid)], [b, a])
+        L.delete_favorite(self.con, a)
+        self.assertEqual(len(L.favorites(self.con, self.lid)), 1)
+        self.assertEqual(L.tags_of('#여행 부산 #맛집, #여행'), ['여행', '맛집'])
+        L.add_entry(self.con, self.lid, {'date': '2026-10-01', 'item': '기차 #여행', 'expense': 50000, 'code': '40'})
+        L.add_entry(self.con, self.lid, {'date': '2026-10-02', 'item': '숙소', 'expense': 80000, 'code': '80', 'memo': '#여행 #부산'})
+        t = {r['tag']: (r['count'], r['expense']) for r in L.tag_summary(self.con, self.lid)}
+        self.assertEqual(t, {'여행': (2, 130000), '부산': (1, 80000)})
+        self.assertEqual(len(L.entries_with_tag(self.con, self.lid, '부산')), 1)
+
+    def test_budget_alert_and_insight(self):
+        RP.set_budget(self.con, self.lid, '2026-10', '30', 100000)
+        self.add('2026-10-02', '장보기', exp=70000)
+        before = INS.code_spent(self.con, self.lid, '30', D(2026, 10, 5))
+        self.add('2026-10-05', '장보기', exp=15000)
+        self.assertIn('85%', INS.budget_alert(self.con, self.lid, '30', D(2026, 10, 5), before))
+        before = INS.code_spent(self.con, self.lid, '30', D(2026, 10, 6))
+        self.add('2026-10-06', '장보기', exp=20000)
+        self.assertIn('넘었어요', INS.budget_alert(self.con, self.lid, '30', D(2026, 10, 6), before))
+        before = INS.code_spent(self.con, self.lid, '30', D(2026, 10, 7))
+        self.add('2026-10-07', '장보기', exp=1000)
+        self.assertIsNone(INS.budget_alert(self.con, self.lid, '30', D(2026, 10, 7), before))   # 이미 넘은 뒤엔 다시 안 알림
+        p = INS.budget_progress(self.con, self.lid, 2026, 10, 1, D(2026, 10, 7))
+        self.assertEqual((p['spent'], p['pct'], p['days_left']), (106000, 106, 25))
+        self.add('2026-09-03', '장보기', exp=50000)
+        i = INS.month_insight(self.con, self.lid, 2026, 10, 1, D(2026, 10, 10))
+        self.assertEqual((i['days'], i['expense'], i['prev_same'], i['no_spend'], i['streak']), (10, 106000, 50000, 6, 3))
+        self.assertEqual(i['change_pct'], 112)
+        self.assertEqual(INS.no_spend_streak(self.con, self.lid, D(2026, 10, 7)), 0)
+
+    def test_transfer(self):
+        a = A.save_account(self.con, 'bank', {'name': '월급', 'opening': 100000})
+        b = A.save_account(self.con, 'bank', {'name': '비상금', 'opening': 0})
+        x, y = A.transfer(self.con, a, b, D(2026, 10, 1), 30000)
+        self.assertEqual((A.account_balance(self.con, a), A.account_balance(self.con, b)), (70000, 30000))
+        A.update_tx(self.con, x, {'date': D(2026, 10, 2), 'summary': '이체', 'deposit': 0, 'withdraw': 40000, 'memo': ''})
+        self.assertEqual((A.account_balance(self.con, a), A.account_balance(self.con, b)), (60000, 40000))
+        A.delete_tx(self.con, y)
+        self.assertEqual((A.account_balance(self.con, a), A.account_balance(self.con, b)), (100000, 0))
+        with self.assertRaises(ValueError):
+            A.transfer(self.con, a, a, D(2026, 10, 1), 1)
+
+    def test_goals_and_debts(self):
+        g = G.save_goal(self.con, {'name': '여행', 'target': 1000000, 'due': D(2026, 12, 31)})
+        G.add_goal_tx(self.con, g, D(2026, 10, 1), 400000)
+        st = G.goal_status(self.con, G.goals(self.con)[0], D(2026, 10, 20))
+        self.assertEqual((st['saved'], st['left'], st['pct'], st['per_month']), (400000, 600000, 40, 200000))
+        d = G.save_debt(self.con, {'kind': 'lend', 'person': '철수', 'amount': 50000})
+        G.save_debt(self.con, {'kind': 'borrow', 'person': '영희', 'amount': 20000})
+        G.add_payment(self.con, d, D(2026, 10, 5), 50000)
+        self.assertEqual(G.debt_totals(self.con), (0, 20000))
+        self.assertEqual(G.debts(self.con, include_done=False)[0]['person'], '영희')
+        pid = G.payments(self.con, d)[0]['id']
+        G.delete_payment(self.con, pid)
+        self.assertEqual(G.debt_totals(self.con), (50000, 20000))
+        s = A.summary(self.con)
+        self.assertEqual((s['받을돈'], s['갚을돈']), (50000, 20000))
+
+    def test_attachment_cascade(self):
+        e = self.add('2026-10-01', '영수증', exp=1000)
+        AT.add(self.con, e, b'\xff\xd8\xff', 'a.jpg')
+        self.assertEqual(AT.counts(self.con, [e]), {e: 1})
+        L.delete_entries(self.con, [e])
+        self.assertEqual(AT.total_size(self.con), 0)
 
 
 @unittest.skipUnless(os.environ.get('GAGYEBU_TEST_MDB_DIR') and I.have_mdbtools(), '원본 mdb 폴더 필요')

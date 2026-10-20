@@ -53,6 +53,44 @@ final class Pure {
         return out;
     }
 
+    // ── 홈 화면 위젯용 날짜·금액 (util.js settlePeriod·fmtMoney 와 같은 규칙) ──
+    static int monthEnd(int y, int m) {
+        int[] d = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        boolean leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        return m == 2 && leap ? 29 : d[m - 1];
+    }
+
+    static String iso(int y, int m, int d) {
+        return String.format(Locale.ROOT, "%04d-%02d-%02d", y, m, d);
+    }
+
+    /** 결산일 기준 '그 달' 기간 [시작, 끝] (YYYY-MM-DD). 결산일 25일이면 25일 ~ 다음 달 24일 */
+    static String[] settlePeriod(int y, int m, int sd) {
+        sd = Math.max(1, Math.min(31, sd));
+        int ny = m == 12 ? y + 1 : y, nm = m == 12 ? 1 : m + 1;
+        int ed = Math.min(sd, monthEnd(ny, nm)) - 1;
+        String end;
+        if (ed >= 1) {
+            end = iso(ny, nm, ed);
+        } else {
+            end = iso(y, m, monthEnd(y, m));         // 결산일 1일: 그 달 말일까지
+        }
+        return new String[]{iso(y, m, Math.min(sd, monthEnd(y, m))), end};
+    }
+
+    /** 오늘(YYYY-MM-DD)이 들어 있는 결산 '달' {연, 월} */
+    static int[] periodOf(String today, int sd) {
+        int y = Integer.parseInt(today.substring(0, 4)), m = Integer.parseInt(today.substring(5, 7));
+        if (today.compareTo(settlePeriod(y, m, sd)[0]) >= 0) {
+            return new int[]{y, m};
+        }
+        return m == 1 ? new int[]{y - 1, 12} : new int[]{y, m - 1};
+    }
+
+    static String money(long v) {
+        return String.format(Locale.ROOT, "%,d", v);
+    }
+
     /** UTF-8 로 읽고, 안 되면 엑셀이 흔히 쓰는 CP949(EUC-KR 확장)로 */
     static String decodeText(byte[] b) {
         try {

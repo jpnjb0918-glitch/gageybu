@@ -142,18 +142,44 @@ def add_tx(con, aid, tx, ledger_id=None, code=None):
 
 
 def update_tx(con, tid, tx):
+    dep, wd = int(tx.get('deposit') or 0), int(tx.get('withdraw') or 0)
     con.execute('UPDATE account_tx SET date=?,summary=?,deposit=?,withdraw=?,memo=? WHERE id=?',
-                (iso(tx['date']), tx.get('summary', ''), int(tx.get('deposit') or 0), int(tx.get('withdraw') or 0),
-                 tx.get('memo', ''), tid))
+                (iso(tx['date']), tx.get('summary', ''), dep, wd, tx.get('memo', ''), tid))
+    r = con.execute('SELECT link_id FROM account_tx WHERE id=?', (tid,)).fetchone()
+    if r and r['link_id']:                         # 이체: 짝 거래도 같은 날짜·금액으로 (입금↔출금)
+        con.execute('UPDATE account_tx SET date=?,deposit=?,withdraw=?,memo=? WHERE id=?',
+                    (iso(tx['date']), wd, dep, tx.get('memo', ''), r['link_id']))
     con.commit()
 
 
 def delete_tx(con, tid, with_entry=False):
-    r = con.execute('SELECT entry_id FROM account_tx WHERE id=?', (tid,)).fetchone()
+    r = con.execute('SELECT entry_id, link_id FROM account_tx WHERE id=?', (tid,)).fetchone()
     if with_entry and r and r['entry_id']:
         con.execute('DELETE FROM entry WHERE id=?', (r['entry_id'],))
+    if r and r['link_id']:                         # 이체는 짝 거래도 함께 지움
+        con.execute('DELETE FROM account_tx WHERE id=?', (r['link_id'],))
     con.execute('DELETE FROM account_tx WHERE id=?', (tid,))
     con.commit()
+
+
+def transfer(con, from_id, to_id, date, amount, memo=''):
+    """자산 간 이체 (1.7.0): 보내는 쪽 출금 + 받는 쪽 입금을 짝으로 저장. 장부의 수입·지출로는 세지 않음.
+    반환: (출금 거래 번호, 입금 거래 번호)"""
+    amount = int(amount or 0)
+    if from_id == to_id:
+        raise ValueError('보내는 곳과 받는 곳이 같습니다')
+    if amount <= 0:
+        raise ValueError('이체 금액을 입력하세요')
+    names = {r['id']: r['name'] for r in con.execute('SELECT id, name FROM account WHERE id IN (?,?)', (from_id, to_id))}
+    if len(names) != 2:
+        raise ValueError('자산을 찾을 수 없습니다')
+    a = con.execute('INSERT INTO account_tx(account_id,date,summary,deposit,withdraw,memo) VALUES(?,?,?,?,?,?)',
+                    (from_id, iso(date), f'이체 → {names[to_id]}', 0, amount, memo or '')).lastrowid
+    b = con.execute('INSERT INTO account_tx(account_id,date,summary,deposit,withdraw,memo,link_id) VALUES(?,?,?,?,?,?,?)',
+                    (to_id, iso(date), f'이체 ← {names[from_id]}', amount, 0, memo or '', a)).lastrowid
+    con.execute('UPDATE account_tx SET link_id=? WHERE id=?', (b, a))
+    con.commit()
+    return a, b
 
 
 # ── 신용카드 ────────────────────────────────────────────
@@ -313,7 +339,9 @@ def summary(con, today=None):
                 s['부동산'] += a['valuation']
                 s['대출'] += a['loan']
     s['카드'] = card_unpaid_total(con)
-    s['자산합계'] = s['예금'] + s['증권'] + s['부동산'] + s['기타']
-    s['부채합계'] = s['대출'] + s['카드'] + s['기타부채']
+    from . import goals as G                       # 빌려준 돈 = 받을 돈(자산), 빌린 돈 = 갚을 돈(부채) (1.7.0)
+    s['받을돈'], s['갚을돈'] = G.debt_totals(con)
+    s['자산합계'] = s['예금'] + s['증권'] + s['부동산'] + s['기타'] + s['받을돈']
+    s['부채합계'] = s['대출'] + s['카드'] + s['기타부채'] + s['갚을돈']
     s['순자산'] = s['자산합계'] - s['부채합계']
     return s

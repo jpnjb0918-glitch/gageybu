@@ -22,6 +22,9 @@ Pages.calendar = (() => {
     const sums = {};
     for (const r of DB.q('SELECT date, SUM(income) AS i, SUM(expense) AS e FROM entry WHERE ledger_id=? AND date BETWEEN ? AND ? GROUP BY date', [lid, g0, g1])) sums[r.date] = r;
     const today = U.today();
+    // 무지출 챌린지: 이 달에서 오늘까지 지출 없는 날에 표시
+    const m0 = U.iso(s.y, s.m, 1), m1 = U.iso(s.y, s.m, U.monthEnd(s.y, s.m));
+    const ns = m0 <= today ? new Set(Ins.noSpendDays(lid, m0, m1 < today ? m1 : today)) : new Set();
     let html = '<table class="cal"><tr>' + '일월화수목금토'.split('').map(d => `<th>${d}</th>`).join('') + '</tr>';
     for (const week of grid) {
       html += '<tr>';
@@ -36,14 +39,15 @@ Pages.calendar = (() => {
         html += `<td class="${cls}" data-d="${d}"><span class="dn">${Number(d.slice(8))}</span>${showLu ? `<span class="lu">${lu.m}.${lu.d}</span>` : ''}
           ${an.slice(0, 1).map(a => `<div class="an${a[1] ? ' h' : ''}">${U.esc(a[0])}</div>`).join('')}
           ${(sch[d] || []).slice(0, 2).map(x => `<div class="sc" style="${x.bg ? `background:${U.esc(x.bg)}` : ''}">${U.esc(x.text)}</div>`).join('')}
-          ${sm && sm.i ? `<div class="mi">+${short(sm.i)}</div>` : ''}${sm && sm.e ? `<div class="mo">-${short(sm.e)}</div>` : ''}</td>`;
+          ${sm && sm.i ? `<div class="mi">+${short(sm.i)}</div>` : ''}${sm && sm.e ? `<div class="mo">-${short(sm.e)}</div>` : ''}${!other && ns.has(d) ? '<div class="nsp">무지출</div>' : ''}</td>`;
       });
       html += '</tr>';
     }
     html += '</table>';
     c.appendChild(UI.el(`<div>${html}</div>`));
     const [mi, me] = L.totals(lid, U.iso(s.y, s.m, 1), U.iso(s.y, s.m, U.monthEnd(s.y, s.m)));
-    c.appendChild(UI.el(`<div class="small muted" style="margin-top:6px">이달 수입 <span class="in">${UI.money(mi)}</span> · 지출 <span class="out">${UI.money(me)}</span> — 날짜를 누르면 그날 일정·내역을 봅니다</div>`));
+    const streak = m0 <= today && today <= m1 ? Ins.noSpendStreak(lid, today) : 0;
+    c.appendChild(UI.el(`<div class="small muted" style="margin-top:6px">이달 수입 <span class="in">${UI.money(mi)}</span> · 지출 <span class="out">${UI.money(me)}</span>${ns.size ? ` · <span class="nsp-t">무지출 ${ns.size}일${streak >= 2 ? ` (오늘까지 ${streak}일째)` : ''}</span>` : ''} — 날짜를 누르면 그날 일정·내역을 봅니다</div>`));
     UI.on(c, 'td[data-d]', 'click', (e, td) => { s.sel = td.dataset.d; daySheet(td.dataset.d); UI.$$('td.sel', c).forEach(x => x.classList.remove('sel')); td.classList.add('sel'); });
     App.fab(() => scheduleSheet(null, s.sel || today), '일정 추가');
   }

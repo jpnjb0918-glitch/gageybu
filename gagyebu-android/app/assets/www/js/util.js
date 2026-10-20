@@ -36,6 +36,41 @@ const U = (() => {
     return v;
   }
 
+  /** 금액 칸 계산기: '12000+3500', '45,000/3', '(1200+800)*2' — 숫자와 + - * / × ÷ ( ) 만.
+      결과는 원 단위 반올림(0.5 는 0 에서 먼 쪽). 식이 아니면 parseMoney. PC판 util.calc_money 와 같은 규칙 */
+  function calcMoney(s) {
+    const t = String(s === null || s === undefined ? '' : s).replace(/[,\s원₩]/g, '').replace(/×/g, '*').replace(/÷/g, '/').replace(/[xX]/g, '*');
+    if (!/\d[-+*/]|[)*/(]/.test(t)) return parseMoney(t);
+    const toks = t.match(/\d+(?:\.\d+)?|[-+*/()]/g) || [];
+    if (toks.join('') !== t) throw new Error('계산할 수 없는 식입니다: ' + s);
+    let pos = 0;
+    const peek = () => (pos < toks.length ? toks[pos] : null);
+    const take = () => toks[pos++];
+    const bad = () => { throw new Error('계산할 수 없는 식입니다: ' + s); };
+    function expr() { let v = term(); while (peek() === '+' || peek() === '-') v = take() === '+' ? v + term() : v - term(); return v; }
+    function term() {
+      let v = factor();
+      while (peek() === '*' || peek() === '/') {
+        const op = take(), r = factor();
+        if (op === '/' && r === 0) throw new Error('0으로 나눌 수 없습니다');
+        v = op === '*' ? v * r : v / r;
+      }
+      return v;
+    }
+    function factor() {
+      const tok = peek();
+      if (tok === '+' || tok === '-') { take(); return tok === '+' ? factor() : -factor(); }
+      if (tok === '(') { take(); const v = expr(); if (take() !== ')') throw new Error('괄호가 맞지 않습니다'); return v; }
+      if (tok === null || !/^\d/.test(tok)) bad();
+      return parseFloat(take());
+    }
+    const v = expr();
+    if (pos !== toks.length) bad();
+    const r = Math.floor(Math.abs(v) + 0.5 + 1e-9) * (v >= 0 ? 1 : -1);
+    if (Math.abs(r) >= MONEY_LIMIT) throw new Error('금액이 너무 큽니다');
+    return r;
+  }
+
   // ── 날짜 ──
   const pad = (n, w = 2) => String(n).padStart(w, '0');
   const iso = (y, m, d) => `${pad(y, 4)}-${pad(m)}-${pad(d)}`;
@@ -70,7 +105,7 @@ const U = (() => {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const sum = arr => arr.reduce((a, b) => a + (b || 0), 0);
 
-  return { INCOME_GROUP, CODE_CHARS, MONEY_LIMIT, WEEKDAYS, WEATHER, isIncomeCode, fmtMoney, parseMoney,
+  return { INCOME_GROUP, CODE_CHARS, MONEY_LIMIT, WEEKDAYS, WEATHER, isIncomeCode, fmtMoney, parseMoney, calcMoney,
     pad, iso, parts, isValidIso, today, ord, fromOrd, addDays, weekday, monthEnd, addMonths, clampDay,
     settlePeriod, ym, monthLabel, dateLabel, shortDate, esc, sum };
 })();

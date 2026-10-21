@@ -1,13 +1,8 @@
 package kr.gagyebu.mobile;
 
-import android.content.ContentProvider;
-import android.content.ContentValues;
 import android.content.Context;
-import android.database.Cursor;
-import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
-import android.provider.OpenableColumns;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -17,7 +12,7 @@ import java.io.FileNotFoundException;
  * 찍기를 부탁한 사진기 앱에게만 잠깐 쓰기 권한을 준다 (exported=false, grantUriPermissions=true).
  * content://kr.gagyebu.mobile.capture/photo.jpg
  */
-public class CaptureProvider extends ContentProvider {
+public class CaptureProvider extends CacheFileProvider {
     static final String AUTHORITY = "kr.gagyebu.mobile.capture";
     static final String NAME = "photo.jpg";
 
@@ -26,10 +21,11 @@ public class CaptureProvider extends ContentProvider {
     }
 
     static Uri uri() {
-        return new Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(NAME).build();
+        return uriOf(AUTHORITY, NAME);
     }
 
-    private File fileOf(Uri uri) throws FileNotFoundException {
+    @Override
+    File fileOf(Uri uri) throws FileNotFoundException {
         if (!NAME.equals(uri.getLastPathSegment())) {
             throw new FileNotFoundException("잘못된 파일 이름");
         }
@@ -39,11 +35,6 @@ public class CaptureProvider extends ContentProvider {
             throw new FileNotFoundException("사진을 둘 곳을 만들 수 없습니다");
         }
         return f;
-    }
-
-    @Override
-    public boolean onCreate() {
-        return true;
     }
 
     @Override
@@ -62,44 +53,7 @@ public class CaptureProvider extends ContentProvider {
     }
 
     @Override
-    public Cursor query(Uri uri, String[] projection, String selection, String[] args, String sort) {
-        File f;
-        try {
-            f = fileOf(uri);
-        } catch (FileNotFoundException e) {
-            return null;
-        }
-        String[] cols = projection != null ? projection : new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
-        MatrixCursor c = new MatrixCursor(cols, 1);
-        Object[] row = new Object[cols.length];
-        for (int i = 0; i < cols.length; i++) {
-            if (OpenableColumns.DISPLAY_NAME.equals(cols[i])) {
-                row[i] = NAME;
-            } else if (OpenableColumns.SIZE.equals(cols[i])) {
-                row[i] = f.length();
-            }
-        }
-        c.addRow(row);
-        return c;
-    }
-
-    @Override
     public String getType(Uri uri) {
         return "image/jpeg";
-    }
-
-    @Override
-    public Uri insert(Uri uri, ContentValues values) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public int delete(Uri uri, String selection, String[] args) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public int update(Uri uri, ContentValues values, String selection, String[] args) {
-        throw new UnsupportedOperationException();
     }
 }

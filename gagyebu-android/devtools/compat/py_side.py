@@ -25,13 +25,31 @@ from gagyebu.services import attach as AT                          # noqa: E402
 from gagyebu.services import goals as G                            # noqa: E402
 from gagyebu.services import insights as INS                       # noqa: E402
 from gagyebu.services import smsparse as SMS                       # noqa: E402
+from gagyebu.services import money as M                            # noqa: E402
+from gagyebu.services import trash as TR                           # noqa: E402
+from gagyebu.services import catemoji as E                         # noqa: E402
 
 SMS_SAMPLE = "[Web발신]\n신한카드(1234)승인 홍*동 12,500원(일시불)10/19 12:34 스타벅스 누적1,234,567원\n[Web발신]\nKB국민카드1234승인\n홍*동님\n45,000원 일시불\n10/18 19:02\n교촌치킨\n누적1,279,567원\n[Web발신]\n삼성1234승인 홍*동\n120,000원 03개월\n10/17 15:20 이마트 성수점\n누적1,399,567원\n[Web발신]\n현대카드 M 승인\n홍*동\n8,900원 일시불\n10/16 08:10\nGS25 역삼점\n누적1,408,467원\n[Web발신]\n롯데카드 2*7*승인취소 홍*동 12,500원 일시불 10/19 13:00 스타벅스\n[Web발신]\n[KB]10/15 09:00\n123-***-456\n홍길동\n입금\n3,200,000\n잔액5,000,000\n[Web발신]\n우리(1234)승인\n홍*동님\n6,000원 일시불\n10/14 21:45\n쿠팡이츠\n누적123,000원\n[Web발신]\n하나(1*2*)승인 홍*동님 23,400원 일시불 10/13 18:30 올리브영 누적1,234,567원\n[Web발신]\nNH농협카드(1234)승인 홍*동 4,500원 일시불 01/03 07:55 메가커피 총누적1,234,567원\n[카카오뱅크] 홍*동(1234) 10/12 11:20 출금 15,000원 배달의민족 잔액 123,456원\n"
 GUESS_ITEMS = [['스타벅스 강남점', False], ['메가박스 코엑스', False], ['쿠팡이츠', False], ['쿠팡', False], ['GS25 역삼점', False], ['이마트 성수점', False], ['KTX 서울', False], ['SKT 요금', False], ['넷플릭스', False], ['기차표', False], ['아무가게', False], ['홍길동', True], ['한전', False]]
 CALC_SAMPLES = ["12000+3500", "45,000/3", "(1200+800)*2", "1,000", "", "-500", "10000-2500*2", "7/2", "5/2", "-5/2", "3×4", "12÷5", "1e3", "2*(3", "10/0", "1.5*3", "0.1*3"]
 
 TODAY = dt.date(2026, 10, 16)
+SPLIT_SAMPLES = [[{'date': '2026-01-31', 'item': '자동차보험', 'expense': 1000003, 'code': '60', 'memo': '1년치', 'pay': 'card'}, 12],
+                 [{'date': '2026-03-15', 'item': '상여', 'income': 500000, 'code': '00'}, 3],
+                 [{'date': '2026-03-15', 'item': 'x', 'expense': 5, 'code': '30'}, 12],
+                 [{'date': '2026-03-15', 'item': 'x', 'expense': 500, 'income': 5, 'code': '30'}, 2],
+                 [{'date': '2026-03-15', 'item': 'x', 'expense': 500, 'code': '30'}, 1],
+                 [{'date': '2026-12-31', 'item': '연회비', 'expense': 120000, 'code': '80'}, 61]]
+FX_SAMPLES = [['12.5', 'USD', '1,380.5'], ['3,500', 'JPY', '935.2'], ['100000', 'VND', '5.4'], ['0.99', 'EUR', '1500.55'],
+              ['1', 'USD', '0.5'], ['1', 'USD', '1.49999'], ['abc', 'USD', '1300'], ['10', 'XXX', '1300'], ['10', 'USD', '0'],
+              ['999999999.99', 'GBP', '1777.7777'], ['12.50', 'THB', '38.40'], ['', 'USD', '1300']]
+EMO_NAMES = ['급여', '기타 수입', '공과금', '수도세', '전기세', '가스비', '교육비', '학원비', '교재비', '식비', '식료품', '외식', '교통·통신비',
+             '대중교통', '휴대폰 요금', '인터넷', '생활용품', '생필품', '보험', '보험료', '저축', '적금', '기타지출', '잡비', '미술',
+             '계약금', '여행', '넷플릭스', '아기 기저귀', '술', '술값', 'TV 수신료', '반려동물', '']
+GUESS_PAY = [['신한카드', 'out'], ['KB국민카드', 'out'], ['현대카드', 'out'], ['삼성', 'out'], ['카카오뱅크', 'out'], ['', 'out'],
+             ['네이버페이', 'out'], ['하나', 'in'], ['롯데카드', 'cancel'], ['신한체크', 'out']]
 D = dt.date
+
 
 
 def build(path):
@@ -149,6 +167,52 @@ def build(path):
     db.set_meta(con, 'settle_day', 25)
     db.set_meta(con, 'password', util.hash_password('1111'))
     con.commit()
+    # 1.8.0: 결제수단·나눠 적기·외화 환율·매주/매년·주간/전체 예산·카테고리 그림·휴지통
+    c3 = A.save_card(con, {'company': '신한', 'name': 'Deep Dream', 'pay_day': 14, 'x.perf': 300000})
+    A.save_card(con, {'x.perf': 200000}, c1)
+    add2 = lambda d, item, exp=0, code='31', pay='', inc=0: L.add_entry(
+        con, lid, {'date': d, 'item': item, 'income': inc, 'expense': exp, 'code': code, 'pay': pay})
+    add2(D(2026, 10, 2), '스타벅스', 4800, pay=f'card:{c3}')
+    add2(D(2026, 10, 9), '스타벅스', 5200, pay=f'card:{c3}')
+    add2(D(2026, 8, 30), '스타벅스', 4500, pay='cash')
+    add2(D(2026, 7, 10), '스타벅스', 4100, pay='cash')
+    add2(D(2026, 10, 9), '스타벅스 (취소)', -5200, pay=f'card:{c3}')
+    add2(D(2026, 10, 7), '편의점', 3000, code='30', pay='pay')
+    add2(D(2026, 10, 8), '시장', 12000, code='30', pay='etc:지역화폐')
+    add2(D(2026, 10, 6), '버스', 1500, code='40', pay=f'card:{c1}')
+    add2(D(2026, 9, 6), '버스', 1500, code='40', pay=f'card:{c1}')
+    add2(D(2026, 10, 6), '용돈 받음', inc=20000, code='01', pay='bank')
+    M.set_custom_pays(con, ['지역화폐', '상품권', '지역화폐', ' ', '현금'])
+    add2(D(2026, 10, 9), '꽃집', 8000, code='30', pay='etc:상품권')
+    M.rename_custom_pay(con, '상품권', '온누리상품권')          # 넣은 내역의 결제수단도 같이 바뀜
+    M.add_split(con, lid, {'date': D(2026, 1, 31), 'item': '자동차보험', 'expense': 1200005, 'code': '60',
+                           'pay': f'card:{c3}', 'memo': '1년치'}, 12)
+    M.set_fx_rate(con, 'USD', '1,380.5')
+    M.set_fx_rate(con, 'JPY', '935.2')
+    R.save_rule(con, lid, {'item': '용돈', 'expense': 30000, 'code': '80', 'start': D(2026, 9, 1), 'cycle': 'W',
+                           'wday': 4, 'every': 2, 'pay': 'cash'})
+    R.save_rule(con, lid, {'item': '자동차세', 'expense': 200000, 'code': '60', 'start': D(2025, 1, 1), 'cycle': 'Y',
+                           'ymonth': 6, 'day': 30, 'end': D(2030, 12, 31)})
+    wr = R.save_rule(con, lid, {'item': '주간 회비', 'income': 10000, 'code': '01', 'start': D(2026, 10, 1), 'cycle': 'W',
+                                'wday': 0, 'end': D(2026, 11, 30)})
+    R.save_rule(con, lid, {'item': '연말 정산', 'income': 300000, 'code': '01', 'start': D(2026, 1, 1), 'cycle': 'Y',
+                           'ymonth': 2, 'day': 31})
+    due, _ = R.pending(con, lid, D(2026, 10, 12))
+    R.apply(con, lid, [x for x in due if x['rule']['id'] == wr][:1])
+    M.set_week_budget(con, lid, 150000)
+    M.set_total_budget(con, lid, ['2026-10', '2026-11'], 1400000)
+    M.set_total_budget(con, lid, ['2026-11'], 0)
+    E.set_emoji(con, lid, '31', '🍜')
+    E.fill_defaults(con, lid)
+    E.set_emoji(con, lid, '30', '')
+    E.set_emoji(con, lid, '9', '🎬🎬🎬🎬🎬')
+    t_e = con.execute("SELECT id FROM entry WHERE item='숙소'").fetchone()[0]
+    L.delete_entries(con, [t_e, con.execute("SELECT id FROM entry WHERE item='편의점' AND pay='pay'").fetchone()[0]])
+    TR.restore(con, [x['id'] for x in TR.items(con, lid) if x['entry'].get('item') == '숙소'])
+    L.delete_entries(con, [con.execute("SELECT id FROM entry WHERE item='시장'").fetchone()[0]])
+    L.set_category(con, lid, '33', '지울것')
+    add2(D(2026, 10, 1), '지울 내역', 1000, code='33')
+    L.delete_category(con, lid, '33')
     L.ensure_default_ledgers(con)        # PC판 프로그램이 열 때처럼 기본 장부 추가 (휴대폰판이 다시 더하지 않는지도 비교됨)
     con.close()
 
@@ -216,6 +280,32 @@ def dump(path, out):
                 res[f'{k}.insight.{y}.{m}.{sd}'] = INS.month_insight(con, lid, y, m, sd, TODAY)
             res[f'{k}.codespent.{sd}'] = [INS.code_spent(con, lid, c, d, sd) for c in ('30', '31', '40') for d in (D(2026, 10, 1), D(2026, 10, 24), D(2026, 10, 25))]
             res[f'{k}.alert.{sd}'] = [INS.budget_alert(con, lid, c, D(2026, 10, 16), b, sd) for c in ('30', '31') for b in (0, 100000, 130000, 330000, 400000)]
+        res[k + '.pay_sum'] = M.pay_summary(con, lid, D(2026, 10, 1), D(2026, 10, 31))
+        res[k + '.pay_sum_all'] = M.pay_summary(con, lid, D(2020, 1, 1), D(2030, 12, 31))
+        res[k + '.pay_ent'] = [r['id'] for r in M.entries_by_pay(con, lid, 'cash', D(2026, 1, 1), D(2026, 12, 31))]
+        res[k + '.search_pay'] = [r['id'] for r in L.search(con, lid, pays=['pay', 'cash', 'etc:지역화폐'])]
+        for it in ('스타벅스', '버스', '', '없는가게'):
+            sp = M.same_place(con, lid, it, TODAY)
+            res[f'{k}.same.{it}'] = None if sp is None else dict(_j({kk: v for kk, v in sp.items() if kk != 'rows'}), rows=[r['id'] for r in sp['rows']])
+        res[k + '.week'] = [M.week_progress(con, lid, d, TODAY) for d in (D(2026, 10, 16), D(2026, 10, 5), D(2026, 10, 26))]
+        res[k + '.weeks'] = [M.weeks_of_month(con, lid, 2026, 10, sd) for sd in (1, 25)]
+        res[k + '.sav'] = [M.savings_trend(con, lid, 2026, sd) for sd in (1, 25)]
+        res[k + '.fixed'] = [M.fixed_summary(con, lid, 2026, m, sd, TODAY) for m in (9, 10, 11) for sd in (1, 25)]
+        res[k + '.tbud'] = [M.total_budget(con, lid, ym) for ym in ('2026-10', '2026-11')]
+        res[k + '.talert'] = [M.total_alert(con, lid, D(2026, 10, 16), b, sd) for b in (0, 1500000, 1700000, 2500000) for sd in (1, 25)]
+        res[k + '.mspent'] = [M.month_spent(con, lid, D(2026, 10, 16), sd) for sd in (1, 25)]
+        res[k + '.mcal'] = M.money_events(con, lid, D(2026, 9, 25), D(2026, 11, 5), TODAY)
+        sid = con.execute("SELECT MIN(id) FROM entry WHERE ledger_id=? AND origin LIKE 'split:%'", (lid,)).fetchone()[0]
+        res[k + '.split_grp'] = M.split_group(con, sid) if sid else []
+        res[k + '.split_one'] = M.split_group(con, con.execute('SELECT MIN(id) FROM entry WHERE ledger_id=?', (lid,)).fetchone()[0] or 0)
+        res[k + '.trash'] = [dict(x, entry=x['entry']) for x in TR.items(con, lid)]
+        res[k + '.trash_n'] = TR.count(con, lid)
+        res[k + '.emoji'] = E.emoji_map(con, lid)
+        emap = E.emoji_map(con, lid)
+        res[k + '.deco'] = [E.deco(emap, c['code'], c['name']) for c in L.categories(con, lid)] + [E.deco(emap, 'zz', '없음')]
+        res[k + '.ruletext'] = [R.rule_text(r) for r in R.rules(con, lid)]
+        res[k + '.occ'] = [[d.isoformat() for d in R.occurrences(r, D(2025, 6, 1), D(2027, 7, 1))] for r in R.rules(con, lid)]
+        res[k + '.status'] = [[R.status_of(con, r, d, TODAY) for d in R.occurrences(r, D(2026, 9, 1), D(2026, 11, 30))] for r in R.rules(con, lid)]
         res[k + '.nospend'] = INS.no_spend_days(con, lid, D(2026, 9, 25), D(2026, 10, 16))
         res[k + '.streak'] = [INS.no_spend_streak(con, lid, d) for d in (D(2026, 10, 16), D(2026, 10, 11), D(2026, 10, 9))]
     res['order.contact'] = [r['id'] for r in O.apply_list_order(con, 'contact', C.simple_list(con, 'contact', 'name'))]
@@ -263,6 +353,30 @@ def dump(path, out):
         d += dt.timedelta(days=97)
     res['lunar'] = _j(lun)
     res['lunar2'] = _j([lunar_to_solar(y, m, dd, False) for y in (2020, 2026, 2033) for m in (1, 4, 8, 12) for dd in (1, 15, 29, 30)])
+    res['pay_opts'] = [list(x) for x in M.pay_options(con)]
+    try:                                     # 같은 이름으로 바꾸려 하면 오류 (자료는 그대로)
+        M.rename_custom_pay(con, '지역화폐', '온누리상품권')
+        res['rename_err'] = ''
+    except ValueError as e:
+        res['rename_err'] = str(e)
+    res['pay_custom'] = M.custom_pays(con)
+    res['guess_pay'] = [M.guess_pay(con, t, kd) for t, kd in GUESS_PAY]
+    res['sms.entries.pay'] = [SMS.to_entry(x, con) for x in res['sms']]
+
+    def err(f):
+        try:
+            return _j(f())
+        except ValueError as e:
+            return 'ERR:' + str(e)
+    res['split_plan'] = [err(lambda e=e, n=n: M.split_plan(e, n)) for e, n in SPLIT_SAMPLES]
+    res['fx'] = [err(lambda a=a, c=c, r=r: list(M.fx_convert(a, c, r))) for a, c, r in FX_SAMPLES]
+    res['fx_rates'] = M.fx_rates(con)
+    res['card_perf'] = [M.card_perf(con, 2026, m) for m in (9, 10)]
+    res['emo_suggest'] = [E.suggest(n) for n in EMO_NAMES]
+    res['week_bounds'] = [_j(list(M.week_bounds(d))) for d in (D(2026, 10, 12), D(2026, 10, 18), D(2026, 10, 19), D(2027, 1, 1))]
+    res['saving_codes'] = M.saving_codes(con, L.first_ledger_id(con))
+    res['trash_all'] = TR.count(con)
+    res['trash_left'] = [TR.days_left('2026-10-01 10:00:00', d) for d in (D(2026, 10, 1), D(2026, 10, 30), D(2026, 10, 31), D(2026, 11, 5))]
     res['meta'] = {r['key']: r['value'] for r in con.execute("SELECT * FROM meta WHERE key<>'password'")}
     res['pw'] = [util.check_password('1111', db.get_meta(con, 'password')), util.check_password('1112', db.get_meta(con, 'password'))]
     con.close()

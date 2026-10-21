@@ -80,7 +80,7 @@ for th in TH.THEMES:
         sns = th in TH.SNS_THEMES
         # 표 모양: SNS 테마면 품목 칸만 보이고 줄이 높음, 아니면 원래 표
         visible = [c for c in range(t.columnCount()) if not t.isColumnHidden(c)]
-        assert visible == ([1] if sns else list(range(7))), (th, visible)
+        assert visible == ([1] if sns else list(range(8))), (th, visible)     # 1.8.0: 결제 칸 추가
         assert (t.rowHeight(0) >= 60) == sns, (th, t.rowHeight(0))
         assert lp.sns_hl.isVisible() == (TH.layout_of(th) == 'feed'), th
         assert lp.sns_center.isVisible() == sns and lp.sns_tabs.isVisible() == sns, th
@@ -111,7 +111,7 @@ for th in TH.THEMES:
         lp.all_chk.setChecked(False)
         # 다른 화면
         for i, p in enumerate(w.pages):
-            if p.title in ('달력', '결산 보고서', '그래프 분석', '자산 관리', '환경 설정', '설정', '검색') or i in (2, 3, 5, 6, 10):
+            if p.title in ('달력', '통계', '그래프', '자산', '설정', '검색') or i in (2, 3, 5, 6, 10):
                 w.nav.setCurrentRow(i)
                 shot(f'{th}_{i:02d}_{p.title}')
         print(f'OK {th}: 칸 {visible}, 첫 줄 높이 {t.rowHeight(0)}, 선택·수정·여러 줄 삭제 정상, 전체 기간 {dt_all:.2f}초')

@@ -990,6 +990,72 @@ public class NativeBridge {
         return l == null ? "" : l;
     }
 
+    // ── 매일 입력 알림 (1.8.0, Reminder.java) ─────────────
+    /** 알림 켜기·끄기와 시각. ask=true 면 안드로이드 13+ 에서 알림 권한을 물어봄 (앱을 켤 때 다시 걸 때는 묻지 않음) */
+    @JavascriptInterface
+    public String setReminder(boolean on, int hour, int minute, boolean ask) {
+        try {
+            SharedPreferences.Editor ed = prefs.edit();
+            if (on) {
+                ed.putString("remind_on", "true");
+            } else {
+                ed.remove("remind_on");
+            }
+            ed.putString("remind_time", String.format(Locale.ROOT, "%02d:%02d", Math.max(0, Math.min(23, hour)), Math.max(0, Math.min(59, minute))));
+            ed.commit();
+            Reminder.schedule(act);
+            if (on && ask && Build.VERSION.SDK_INT >= 33
+                    && act.checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                act.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        act.requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77);
+                    }
+                });
+            }
+            return ok().toString();
+        } catch (Exception e) {
+            return err(e);
+        }
+    }
+
+    /** {"ok":true,"on":..,"time":"HH:MM","allowed":알림이 휴대폰 설정에서 허락됐는지} */
+    @JavascriptInterface
+    public String reminderStatus() {
+        JSONObject o = ok();
+        try {
+            int[] hm = Reminder.time(act);
+            o.put("on", Reminder.isOn(act)).put("time", String.format(Locale.ROOT, "%02d:%02d", hm[0], hm[1])).put("allowed", Reminder.allowed(act));
+        } catch (Exception ignored) {
+        }
+        return o.toString();
+    }
+
+    /** 시험 알림 한 번 (권한이 없으면 물어보고 안내) */
+    @JavascriptInterface
+    public void testReminder(final String cb) {
+        JSONObject r;
+        try {
+            if (Build.VERSION.SDK_INT >= 33
+                    && act.checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                act.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        act.requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77);
+                    }
+                });
+                r = new JSONObject().put("ok", false).put("error", "알림 권한을 허락한 뒤 다시 눌러 주세요.");
+            } else if (!Reminder.allowed(act)) {
+                r = new JSONObject().put("ok", false).put("error", "휴대폰 설정에서 이 앱의 알림이 꺼져 있어요.");
+            } else {
+                r = Reminder.show(act, true) ? ok() : new JSONObject().put("ok", false).put("error", "알림을 보내지 못했어요.");
+            }
+        } catch (Exception e) {
+            r = errObj(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+        }
+        callback(cb, r);
+    }
+
     /** "wt"(비우고 쓰기)를 먼저 쓰고, 지원하지 않는 곳이면 "w" */
     private OutputStream openForWrite(Uri uri) throws Exception {
         ContentResolver cr = act.getContentResolver();

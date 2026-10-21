@@ -17,10 +17,10 @@ FIELDS = {
     'bank': [('company', '은행명', 'text*'), ('name', '통장명', 'text*'), ('owner', '예금주', 'text'),
              ('number', '계좌번호', 'text'), ('opening', '초기 잔액', 'money'), ('x.password', '비밀번호', 'password'),
              ('x.issued', '발행일', 'text'), ('x.maturity', '만기일', 'text'),
-             ('active', '사용여부', 'active'), ('memo', '비고', 'memo')],
+             ('active', '사용여부', 'active'), ('memo', '메모', 'memo')],
     'securities': [('company', '증권사명', 'text*'), ('name', '계좌이름', 'text*'), ('number', '계좌번호', 'text'),
                    ('owner', '소유주', 'text'), ('deposit', '추정 예수금', 'money'), ('valuation', '평가금액', 'money'),
-                   ('x.valued_on', '최종 평가일', 'date'), ('memo', '비고', 'memo')],
+                   ('x.valued_on', '최종 평가일', 'date'), ('memo', '메모', 'memo')],
     'insurance': [('company', '보험사명', 'text*'), ('name', '보험 상품명', 'text*'), ('number', '보험증권번호', 'text'),
                   ('owner', '계약자', 'text'), ('x.insured', '피보험자', 'text'), ('x.contract_date', '계약일', 'date'),
                   ('x.maturity', '만기일', 'date'), ('x.status', '계약상태', 'choice:' + '|'.join(INSURANCE_STATUS)),
@@ -28,11 +28,11 @@ FIELDS = {
                   ('x.pay_method', '납입방법', 'choice:' + '|'.join(INSURANCE_PAY)),
                   ('x.type', '보험종류', 'choice:' + '|'.join(INSURANCE_TYPES)),
                   ('x.total_count', '만기 납입횟수', 'int'), ('x.paid_count', '납입횟수', 'int'),
-                  ('x.paid_total', '납입보험료 누계', 'money'), ('x.agent', '담당자 및 연락처', 'text'), ('memo', '비고', 'memo')],
+                  ('x.paid_total', '납입보험료 누계', 'money'), ('x.agent', '담당자 및 연락처', 'text'), ('memo', '메모', 'memo')],
     'property': [('x.ptype', '구분', 'choice:' + '|'.join(PROPERTY_TYPES)), ('name', '자산명', 'text*'),
                  ('owner', '소유주/임차인', 'text'), ('x.acquired', '취득/임차일자', 'date'),
                  ('valuation', '취득/평가금액', 'money'), ('x.valued_on', '최종 평가일', 'date'),
-                 ('loan', '대출금액', 'money'), ('memo', '비고', 'memo')],
+                 ('loan', '대출금액', 'money'), ('memo', '메모', 'memo')],
 }
 CARD_FIELDS = [('company', '카드사명', 'text*'), ('name', '카드명', 'text*'), ('number', '카드번호', 'text'),
                ('x.password', '카드 비밀번호', 'password'), ('x.valid_ym', '유효기간(YYYY-MM)', 'text'),
@@ -40,7 +40,8 @@ CARD_FIELDS = [('company', '카드사명', 'text*'), ('name', '카드명', 'text
                ('bill_from_day', '청구기간 시작(일)', 'int'), ('bill_to_month', '청구기간 끝(월)', 'billmonth'),
                ('bill_to_day', '청구기간 끝(일)', 'int'), ('bank_account_id', '결제 통장', 'bank'),
                ('x.limit', '카드사용한도', 'money'), ('x.cash_limit', '현금서비스 한도', 'money'),
-               ('x.loan_limit', '대출한도', 'money'), ('x.issued', '발행일', 'date'), ('memo', '비고', 'memo')]
+               ('x.loan_limit', '대출한도', 'money'), ('x.issued', '발행일', 'date'),
+               ('x.perf', '월 실적 목표', 'money'), ('memo', '메모', 'memo')]
 
 
 def _split(values):
@@ -67,23 +68,28 @@ def accounts(con, kind=None):
     return con.execute('SELECT * FROM account ORDER BY kind, sort, id').fetchall()
 
 
-def save_account(con, kind, values, aid=None):
+def _save_with_extra(con, table, values, rid, fixed=None, sort_where='', sort_args=()):
+    """account·card 저장 공통: 'x.' 로 시작하는 값은 extra(JSON)에. 고칠 때는 예전 extra 에 덮어씀.
+    새로 넣을 때는 fixed 값을 더하고, sort 가 없으면 맨 뒤 순서"""
     cols, extra = _split(values)
-    if aid:
-        old = json.loads(con.execute('SELECT extra FROM account WHERE id=?', (aid,)).fetchone()['extra'] or '{}')
+    if rid:
+        old = json.loads(con.execute(f'SELECT extra FROM {table} WHERE id=?', (rid,)).fetchone()['extra'] or '{}')
         old.update(extra)
         cols['extra'] = json.dumps(old, ensure_ascii=False)
-        sets = ','.join(f'{k}=?' for k in cols)
-        con.execute(f'UPDATE account SET {sets} WHERE id=?', list(cols.values()) + [aid])
+        con.execute(f'UPDATE {table} SET {",".join(f"{k}=?" for k in cols)} WHERE id=?', list(cols.values()) + [rid])
     else:
         cols['extra'] = json.dumps(extra, ensure_ascii=False)
-        cols['kind'] = kind
-        cols.setdefault('sort', con.execute('SELECT COALESCE(MAX(sort),0)+1 FROM account WHERE kind=?',
-                                            (kind,)).fetchone()[0])
-        aid = con.execute(f'INSERT INTO account({",".join(cols)}) VALUES({",".join("?" * len(cols))})',
+        cols.update(fixed or {})
+        if 'sort' not in cols:
+            cols['sort'] = con.execute(f'SELECT COALESCE(MAX(sort),0)+1 FROM {table}{sort_where}', sort_args).fetchone()[0]
+        rid = con.execute(f'INSERT INTO {table}({",".join(cols)}) VALUES({",".join("?" * len(cols))})',
                           list(cols.values())).lastrowid
     con.commit()
-    return aid
+    return rid
+
+
+def save_account(con, kind, values, aid=None):
+    return _save_with_extra(con, 'account', values, aid, {'kind': kind}, ' WHERE kind=?', (kind,))
 
 
 def delete_account(con, aid):
@@ -155,6 +161,8 @@ def update_tx(con, tid, tx):
 def delete_tx(con, tid, with_entry=False):
     r = con.execute('SELECT entry_id, link_id FROM account_tx WHERE id=?', (tid,)).fetchone()
     if with_entry and r and r['entry_id']:
+        from . import trash as TR                  # 가계부 내역은 휴지통으로 (1.8.0)
+        TR.put(con, [r['entry_id']], 'asset')
         con.execute('DELETE FROM entry WHERE id=?', (r['entry_id'],))
     if r and r['link_id']:                         # 이체는 짝 거래도 함께 지움
         con.execute('DELETE FROM account_tx WHERE id=?', (r['link_id'],))
@@ -188,19 +196,7 @@ def cards(con):
 
 
 def save_card(con, values, cid=None):
-    cols, extra = _split(values)
-    if cid:
-        old = json.loads(con.execute('SELECT extra FROM card WHERE id=?', (cid,)).fetchone()['extra'] or '{}')
-        old.update(extra)
-        cols['extra'] = json.dumps(old, ensure_ascii=False)
-        con.execute(f'UPDATE card SET {",".join(f"{k}=?" for k in cols)} WHERE id=?', list(cols.values()) + [cid])
-    else:
-        cols['extra'] = json.dumps(extra, ensure_ascii=False)
-        cols.setdefault('sort', con.execute('SELECT COALESCE(MAX(sort),0)+1 FROM card').fetchone()[0])
-        cid = con.execute(f'INSERT INTO card({",".join(cols)}) VALUES({",".join("?" * len(cols))})',
-                          list(cols.values())).lastrowid
-    con.commit()
-    return cid
+    return _save_with_extra(con, 'card', values, cid)
 
 
 def delete_card(con, cid):

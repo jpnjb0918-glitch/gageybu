@@ -21,15 +21,18 @@ Pages.settings = (() => {
     c.appendChild(UI.el(`<div class="settings">
       <button class="sme" data-a="profile"><img src="${UI.sticker(App.pref('minimi'))}" alt=""><span class="nm"><b>${U.esc(App.ledgerName())}</b>
         <small>오늘의 기분: ${U.esc(App.pref('mood'))}</small></span>${UI.icon('chevr', 'go')}</button>
-      ${grp('장부', row('ledgers', 'book', '장부 관리', `${L.ledgers().length}개`) + row('codes', 'tag', '계정과목') + row('items', 'pen', '품목 자동완성')
-        + row('settle', 'calendar', '결산일', `${Rep.settleDay()}일`))}
+      ${grp('가계부', row('ledgers', 'book', '가계부 관리', `${L.ledgers().length}개`) + row('codes', 'tag', '카테고리', '이름 · 그림 · 순서')
+        + row('pays', 'wallet', '결제수단', Pay.custom().length ? `직접 만든 것 ${Pay.custom().length}개` : '현금 · 카드 · 계좌이체 …') + row('items', 'pen', '자주 쓴 내용')
+        + row('settle', 'calendar', '월 시작일', `${Rep.settleDay()}일`) + row('trash', 'trash', '휴지통', `${Trash.count(App.lid)}건 · ${Trash.KEEP_DAYS}일 보관`))}
+      ${grp('알림', row('remind', 'bell', '매일 입력 알림', Money.remindOn() ? `매일 ${Money.remindTime()}` : '꺼짐'),
+        '정한 시각까지 그날 적은 내역이 없으면 알려 드려요. 휴대폰판에만 있는 기능입니다.')}
       ${grp('화면', row('deco', 'palette', '화면 꾸미기', THEME_NAMES[App.theme()]) + row('profile', 'user', '내 프로필', '미니미 · 기분 · 한마디'))}
       ${grp('백업 (PC와 주고받기)', row('export', 'upload', '백업 파일 저장', '내 파일 · 구글 드라이브') + row('share', 'send', '백업 파일 보내기', '카톡 · 디스코드 등'),
         '저장: 저장 창 왼쪽 위 ☰ 를 누르면 내 파일(내장 메모리·다운로드 등 원하는 폴더)이나 Google Drive 를 고를 수 있습니다. 보내기: 카카오톡·디스코드·메일 등 고른 앱으로 파일을 보냅니다.')}
       ${grp('백업 불러오기', row('import', 'download', '백업 파일 불러오기', '내 파일 · 구글 드라이브') + row('importapp', 'archive', '다른 앱에서 불러오기', '내 파일 앱 등')
         + row('kept', 'refresh', '앱 안 보관본', '하루 한 번 자동'),
         '불러오면 지금 자료를 백업 파일 내용으로 바꿉니다 (지금 자료는 앱 안 보관본에 남김). Google Drive 는 휴대폰에 드라이브 앱이 있어야 보입니다. 카톡으로 받은 파일은 카톡에서 저장한 뒤 내 파일에서 고르세요.')}
-      ${grp('CSV (엑셀)', row('csvout', 'table', '내역 CSV로 저장') + row('csvin', 'download', 'CSV 내역 불러오기'), '불러오기 형식: 날짜, 품목, 수입, 지출, 계정코드[, 계정과목, 메모]')}
+      ${grp('CSV (엑셀)', row('csvout', 'table', '내역 CSV로 저장') + row('csvin', 'download', 'CSV 내역 불러오기'), '불러오기 형식: 날짜, 내용, 수입, 지출, 카테고리 번호[, 카테고리, 메모]')}
       ${grp('보안', row('pw', 'lock', hasPw ? '시작 암호 바꾸기' : '시작 암호 정하기', hasPw ? '설정됨' : '없음') + (hasPw ? row('pwoff', 'lock', '시작 암호 해제', '', 'danger') : ''))}
       ${grp('앱', row('update', 'refresh', '업데이트', App.updState().latest ? `새 버전 ${App.updState().latest.version}` : `지금 판 ${App.updState().version || '?'}`)
         + row('info', 'info', '앱 정보'))}
@@ -37,6 +40,7 @@ Pages.settings = (() => {
     const sub = k => () => App.go('settings', { section: k }, true);
     const act = {
       ledgers: ledgerSheet, codes: () => App.go('codes', {}, true), items: itemSheet, settle: settleSheet,
+      pays: () => Money.paySettingsSheet(), trash: () => Money.trashSheet(), remind: () => Money.reminderSheet(),
       export: exportDb, share: shareDb, import: () => importDb(false), importapp: () => importDb(true), kept: keptSheet, csvout: csvOut, csvin: csvIn, pw: pwSheet, pwoff: pwOff,
       deco: sub('deco'), profile: sub('profile'), update: sub('update'), info: () => UI.sheet({ title: '앱 정보', body: infoHtml() }),
     };
@@ -71,25 +75,25 @@ Pages.settings = (() => {
   function ledgerSheet() {
     const ls = L.ledgers();
     const first = L.firstLedgerId();
-    const body = UI.el(`<div><ul class="list">${ls.map(l => `<li><div class="grow"><div class="main-t">${U.esc(l.name)}${l.id === App.lid ? ' <span class="chip on">지금 장부</span>' : ''}</div>
+    const body = UI.el(`<div><ul class="list">${ls.map(l => `<li><div class="grow"><div class="main-t">${U.esc(l.name)}${l.id === App.lid ? ' <span class="chip on">지금 가계부</span>' : ''}</div>
       <div class="sub">내역 ${DB.val('SELECT COUNT(*) AS v FROM entry WHERE ledger_id=?', [l.id])}건</div></div>
       <button class="btn sm" data-r="${l.id}">이름</button><button class="btn sm" data-z="${l.id}">비우기</button>${l.id === first ? '' : `<button class="btn sm danger" data-d="${l.id}">삭제</button>`}</li>`).join('')}</ul></div>`);
-    const sh = UI.sheet({ title: '장부 관리', body, full: true, buttons: [{ label: '새 장부', cls: 'pri', onClick: () => { setTimeout(newLedger, 0); } }] });
+    const sh = UI.sheet({ title: '가계부 관리', body, full: true, buttons: [{ label: '새 가계부', cls: 'pri', onClick: () => { setTimeout(newLedger, 0); } }] });
     const name = id => ls.find(l => l.id === id).name;
     UI.on(body, '[data-r]', 'click', (e, b) => {
       const id = Number(b.dataset.r);
-      UI.formSheet({ title: '장부 이름 바꾸기', fields: [{ k: 'name', label: '장부 이름', type: 'text', req: true }], values: { name: name(id) },
+      UI.formSheet({ title: '가계부 이름 바꾸기', fields: [{ k: 'name', label: '가계부 이름', type: 'text', req: true }], values: { name: name(id) },
         onSave: v => { L.renameLedger(id, v.name); App.reloadLedgers(); App.dataChanged(); sh.close(); } });
     });
     UI.on(body, '[data-z]', 'click', (e, b) => {
       const id = Number(b.dataset.z);
-      UI.confirm(`'${name(id)}'의 내역·예산·예약을 모두 지울까요?\n(계정과목은 남습니다. 되돌릴 수 없으니 먼저 파일로 내보내 두세요)`, '모두 지우기', true).then(ok => {
-        if (ok) { L.resetLedger(id); sh.close(); App.dataChanged(); UI.toast('장부를 비웠습니다'); }
+      UI.confirm(`'${name(id)}'의 내역·예산·고정 수입·지출을 모두 지울까요?\n(카테고리는 남습니다. 되돌릴 수 없으니 먼저 파일로 내보내 두세요)`, '모두 지우기', true).then(ok => {
+        if (ok) { L.resetLedger(id); sh.close(); App.dataChanged(); UI.toast('가계부를 비웠습니다'); }
       });
     });
     UI.on(body, '[data-d]', 'click', (e, b) => {
       const id = Number(b.dataset.d);
-      UI.confirm(`장부 '${name(id)}'과(와) 그 안의 모든 자료를 삭제할까요?`, '삭제', true).then(ok => {
+      UI.confirm(`가계부 '${name(id)}'과(와) 그 안의 모든 자료를 삭제할까요?`, '삭제', true).then(ok => {
         if (!ok) return;
         try { L.deleteLedger(id); } catch (err) { UI.alert(err.message); return; }
         sh.close(); App.reloadLedgers(); App.selectLedger(id === App.lid ? L.firstLedgerId() : App.lid);
@@ -97,13 +101,13 @@ Pages.settings = (() => {
     });
   }
   function newLedger() {
-    UI.formSheet({ title: '새 장부', fields: [{ k: 'name', label: '장부 이름', type: 'text', req: true },
-      { k: 'how', label: '만드는 방법', type: 'select', options: [['empty', '빈 장부 (대분류 수입만)'], ['codes', `지금 장부(${App.ledgerName()})의 계정과목만 복사`], ['all', '지금 장부를 통째로 복사']] }],
+    UI.formSheet({ title: '새 가계부', fields: [{ k: 'name', label: '가계부 이름', type: 'text', req: true },
+      { k: 'how', label: '만드는 방법', type: 'select', options: [['empty', '빈 가계부 (수입 카테고리만)'], ['codes', `지금 가계부(${App.ledgerName()})의 카테고리만 복사`], ['all', '지금 가계부를 통째로 복사']] }],
     values: { how: 'codes' },
     onSave: v => {
       const lid = L.addLedger(v.name, v.how === 'empty' ? null : App.lid, v.how === 'codes');
       App.selectLedger(lid);
-      UI.toast('새 장부를 만들었습니다');
+      UI.toast('새 가계부를 만들었습니다');
     } });
   }
 
@@ -115,15 +119,16 @@ Pages.settings = (() => {
     const body = UI.el(`<div><div class="form"><div class="f"><label class="l">자동완성에 보일 최소 사용 횟수</label><input type="number" data-k="min" value="${min}"></div></div>
       <ul class="list">${words.slice(0, 300).map(w => `<li><div class="grow">${U.esc(w.name)}</div><span class="muted small">${w.count}회</span><button class="btn sm danger" data-w="${U.esc(w.name)}">삭제</button></li>`).join('')}</ul></div>`);
     UI.on(body, '[data-w]', 'click', (e, b) => { L.deleteItemWord(lid, b.dataset.w); b.closest('li').remove(); });
-    UI.sheet({ title: '품목 자동완성', body, full: true, buttons: [{ label: '저장', cls: 'pri', onClick: (cl, sb) => {
+    UI.sheet({ title: '자주 쓴 내용', body, full: true, buttons: [{ label: '저장', cls: 'pri', onClick: (cl, sb) => {
       const n = parseInt(UI.$('[data-k=min]', sb).value, 10);
       if (!n || n < 1) { UI.toast('1 이상으로 입력하세요'); return false; }
       DB.setMeta('item_min_count', n);
       return undefined;
     } }] });
   }
+  /** 월 시작일 정하기 (설정 · 통계 머리 단추가 같이 씀) */
   function settleSheet() {
-    UI.formSheet({ title: '결산일', fields: [{ k: 'sd', label: '결산일 (1~31)', type: 'int', hint: '5일이면 5일~다음달 4일을 한 달로 셉니다' }], values: { sd: Rep.settleDay() },
+    UI.formSheet({ title: '월 시작일', fields: [{ k: 'sd', label: '월 시작일 (1~31)', type: 'int', hint: '5일이면 5일~다음달 4일을 한 달로 셉니다 (월급날 기준 등)' }], values: { sd: Rep.settleDay() },
       onSave: v => { if (!v.sd || v.sd < 1 || v.sd > 31) throw new Error('1~31 사이로 입력하세요.'); DB.setMeta('settle_day', v.sd); App.dataChanged(); } });
   }
 
@@ -193,7 +198,7 @@ Pages.settings = (() => {
       const [rows, errors] = Bk.readEntriesCsv(r.text, valid);
       const body = `<div><div>정상 ${rows.length}건${errors.length ? `, <span class="out">오류 ${errors.length}건</span>` : ''}</div>
         ${errors.length ? `<ul class="list small">${errors.slice(0, 50).map(([n, m]) => `<li>${n}행: ${U.esc(m)}</li>`).join('')}</ul>` : ''}
-        <div class="small muted" style="margin-top:6px">정상인 행만 '${U.esc(App.ledgerName())}' 장부에 넣습니다.</div></div>`;
+        <div class="small muted" style="margin-top:6px">정상인 행만 '${U.esc(App.ledgerName())}' 가계부에 넣습니다.</div></div>`;
       UI.sheet({ title: 'CSV 내역 불러오기', body, full: errors.length > 5, buttons: [{ label: '취소' }, { label: `${rows.length}건 넣기`, cls: 'pri', onClick: () => {
         if (!rows.length) return undefined;
         DB.tx(() => rows.forEach(x => L.addEntry(lid, x, 'csv')));
@@ -240,7 +245,7 @@ Pages.settings = (() => {
         `도트 글꼴은 미니홈피·기본 테마에서, 고운돋움·주아·개구·서툰이야기(무료 글꼴)는 모든 테마에서 쓰입니다. 글자 크기는 1픽셀씩 (${App.FS_MIN}~${App.FS_MAX}px), 바꾸면 바로 보입니다.`, true)}
       ${grp('순서', `<div class="row wrap"><button class="btn sm" data-ord="nav">메뉴 순서</button><button class="btn sm" data-ord="layout">가계부 화면 구성</button></div>
         <label class="check" style="margin:8px 0 0"><input type="checkbox" data-p="budget_card"> 가계부 화면에 이달 예산 막대·무지출 보이기</label>`,
-        '메뉴: 위 4개가 아래 탭, 나머지는 더보기 화면. 계정과목 순서는 설정 → 계정과목에서.', true)}
+        '메뉴: 위 4개가 아래 탭, 나머지는 더보기 화면. 카테고리 순서는 설정 → 카테고리에서.', true)}
       ${grp('이 테마의 색', `<div class="colors"></div><div class="row" style="margin-top:8px"><button class="btn sm" data-creset>이 테마 색 모두 처음으로</button></div>`,
         '고른 색은 이 휴대폰의 지금 테마에만 쓰입니다. 나머지 색(테두리·흐린 글자 등)은 고른 색에 맞춰 바뀝니다.', true)}
       ${grp('맨 위 전광판', '<label class="check" style="margin:0"><input type="checkbox" data-p="marquee"> 흐르는 글자 보이기</label>', '미니홈피 테마에서만 보입니다.', true)}`;
@@ -326,96 +331,154 @@ Pages.settings = (() => {
       음력 계산: korean-lunar-calendar — MIT License<br>
       아늑단 이미지: 사용자가 제공한 스티커 시트에서 오려 낸 그림 (개인 사용)</span></div>`;
   }
-  return { title: p => SECTIONS[p && p.section] || '설정', sticker: 'b08', sub: '내 맘대로 꾸미기', render, tab: 'more', newLedger, ledgerSheet };
+  return { title: p => SECTIONS[p && p.section] || '설정', sticker: 'b08', sub: '내 맘대로 꾸미기', render, tab: 'more', newLedger, ledgerSheet, settleSheet };
 })();
 
-// ════════ 계정과목 편집 ════════
+// ════════ 카테고리 편집 (카테고리 = 대분류, 세부 카테고리 = 소분류) ════════
 Pages.codes = (() => {
   function render(c) {
     const lid = App.lid;
-    c.appendChild(UI.el(`<div class="small muted" style="margin-bottom:6px">'${U.esc(App.ledgerName())}' 장부의 계정과목입니다. 계정코드 첫 글자가 대분류이고, 0으로 시작하면 수입입니다.
-      순서는 입력할 때 고르는 목록과 결산 보고서에 그대로 쓰이고, PC판에서도 같습니다.</div>`));
+    c.appendChild(UI.el(`<div class="small muted" style="margin-bottom:6px">'${U.esc(App.ledgerName())}' 가계부의 카테고리입니다. 0번 카테고리는 수입, 나머지는 지출이고 내역에는 세부 카테고리를 고릅니다.
+      순서는 입력할 때 고르는 목록과 통계에 그대로 쓰이고, PC판에서도 같습니다.</div>`));
     const gs = L.groups(lid), cats = L.categories(lid);
-    const gb = UI.el('<div class="row" style="margin-bottom:6px"><button class="btn sm" data-gord>대분류 순서 바꾸기</button></div>');
+    const gb = UI.el('<div class="row wrap" style="margin-bottom:6px"><button class="btn sm" data-gord>카테고리 순서 바꾸기</button><button class="btn sm" data-fill>이름 보고 그림 넣기</button></div>');
+    const emap = Emo.map(lid);
     c.appendChild(gb);
     let html = '';
     for (const g of gs) {
       const n = cats.filter(x => x.code.slice(0, 1) === g.code).length;
-      html += `<div class="dayhead"><span class="tap" data-g="${U.esc(g.code)}">(${U.esc(g.code)}) ${U.esc(g.name)} <span class="small muted">편집 ›</span></span>
-        <span class="sums">${n > 1 ? `<button class="btn sm" data-cord="${U.esc(g.code)}">소분류 순서</button>` : ''}</span></div><ul class="list">`;
-      html += cats.filter(x => x.code.slice(0, 1) === g.code).map(x => `<li class="tap" data-c="${U.esc(x.code)}"><span class="chip">${U.esc(x.code)}</span><div class="grow">${U.esc(x.name)}</div></li>`).join('');
-      html += `<li class="tap muted" data-add="${U.esc(g.code)}">＋ 소분류 추가</li></ul>`;
+      html += `<div class="dayhead"><span class="tap" data-g="${U.esc(g.code)}">(${U.esc(g.code)}) ${U.esc(Emo.deco(emap, g.code, g.name))} <span class="small muted">편집 ›</span></span>
+        <span class="sums">${n > 1 ? `<button class="btn sm" data-cord="${U.esc(g.code)}">순서</button>` : ''}</span></div><ul class="list">`;
+      html += cats.filter(x => x.code.slice(0, 1) === g.code).map(x => `<li class="tap" data-c="${U.esc(x.code)}"><span class="chip">${U.esc(x.code)}</span><div class="grow">${U.esc(Emo.deco(emap, x.code, x.name))}</div><span class="small muted nowrap">편집 ›</span></li>`).join('');
+      html += `<li class="tap muted" data-add="${U.esc(g.code)}">＋ 세부 카테고리 추가</li></ul>`;
     }
     c.appendChild(UI.el(`<div>${html}</div>`));
-    UI.$('[data-gord]', gb).onclick = () => UI.reorder({ title: '대분류 순서', items: L.groups(lid).map(g => ({ key: g.code, label: `(${g.code}) ${g.name}` })),
+    UI.$('[data-fill]', gb).onclick = () => {
+      const n = Emo.fillDefaults(lid);
+      App.dataChanged();
+      UI.toast(n ? `${n}곳에 그림을 넣었어요` : '이름에 어울리는 그림을 더 찾지 못했어요 (이미 넣은 그림은 그대로)', 2600);
+    };
+    UI.$('[data-gord]', gb).onclick = () => UI.reorder({ title: '카테고리 순서', items: L.groups(lid).map(g => ({ key: g.code, label: `(${g.code}) ${g.name}` })),
       onSave: keys => { Ord.setGroupOrder(lid, keys); App.dataChanged(); },
-      onReset: () => { Ord.setGroupOrder(lid, []); App.dataChanged(); }, resetLabel: '코드 순으로' });
+      onReset: () => { Ord.setGroupOrder(lid, []); App.dataChanged(); }, resetLabel: '번호 순으로' });
     UI.on(c, '[data-cord]', 'click', (e, b) => {
       const g = b.dataset.cord;
       const list = L.categories(lid, g);
-      UI.reorder({ title: `소분류 순서 (${g})`, items: list.map(x => ({ key: x.code, label: `${x.code} ${x.name}` })),
+      UI.reorder({ title: `세부 카테고리 순서 (${g})`, items: list.map(x => ({ key: x.code, label: `${x.code} ${x.name}` })),
         onSave: keys => { Ord.setCategoryOrder(lid, keys); App.dataChanged(); },
-        onReset: () => { Ord.setCategoryOrder(lid, list.map(x => x.code).sort()); App.dataChanged(); }, resetLabel: '코드 순으로' });
+        onReset: () => { Ord.setCategoryOrder(lid, list.map(x => x.code).sort()); App.dataChanged(); }, resetLabel: '번호 순으로' });
     });
     UI.on(c, '[data-g]', 'click', (e, x) => groupSheet(x.dataset.g));
     UI.on(c, '[data-c]', 'click', (e, x) => catSheet(x.dataset.c));
     UI.on(c, '[data-add]', 'click', (e, x) => addCat(x.dataset.add));
-    App.fab(addGroup, '대분류 추가');
+    App.fab(addGroup, '카테고리 추가');
   }
   function addGroup() {
     const lid = App.lid;
     const used = new Set(L.groups(lid).map(g => g.code));
     const free = U.CODE_CHARS.split('').filter(ch => !used.has(ch));
-    if (!free.length) { UI.alert('더 만들 수 있는 대분류 코드가 없습니다.'); return; }
-    UI.formSheet({ title: '대분류 추가', fields: [{ k: 'code', label: '대분류 코드', type: 'select', options: free.map(f => [f, f === '0' ? '0 (수입)' : f]) },
+    if (!free.length) { UI.alert('더 만들 수 있는 카테고리 번호가 없습니다.'); return; }
+    UI.formSheet({ title: '카테고리 추가', fields: [{ k: 'code', label: '카테고리 번호', type: 'select', options: free.map(f => [f, f === '0' ? '0 (수입)' : f]) },
       { k: 'name', label: '이름', type: 'text', req: true }],
     onSave: v => { L.setGroup(lid, v.code, v.name); App.dataChanged(); } });
+  }
+  /** 그림 줄: [그림] [바꾸기] — 고르면 바로 저장 */
+  const emoRow = (lid, code) => `<div class="row" style="margin:4px 0 8px"><span class="l" style="margin:0">그림</span><span class="emo-b">${U.esc(Emo.map(lid)[code] || '없음')}</span>
+    <button type="button" class="btn sm" data-emo>그림 바꾸기</button></div>`;
+  function bindEmo(sb, lid, code, name) {
+    UI.$('[data-emo]', sb).onclick = () => Money.emojiPicker({ current: Emo.map(lid)[code] || '', name, onPick: v => {
+      Emo.set(lid, code, v);
+      UI.$('.emo-b', sb).textContent = Emo.map(lid)[code] || '없음';
+      App.dataChanged();
+    } });
   }
   function groupSheet(code) {
     const lid = App.lid;
     const g = L.groups(lid).find(x => x.code === code);
-    UI.formSheet({ title: `대분류 (${code})`, fields: [{ k: 'name', label: '이름', type: 'text', req: true, hint: code === '0' ? '0번(수입) 대분류 이름은 바꿀 수 없습니다' : '' }],
-      values: { name: g.name },
+    const n = L.categories(lid, code).length;
+    UI.formSheet({ title: `카테고리 (${code})`, fields: [{ k: 'name', label: '이름', type: 'text', req: true, hint: code === '0' ? '수입 카테고리(0번) 이름은 바꿀 수 없습니다' : '' }],
+      values: { name: g.name }, extra: emoRow(lid, code) + '<div class="tiny muted">세부 카테고리에 그림이 없으면 이 그림을 씁니다.</div>',
+      afterOpen: sb => bindEmo(sb, lid, code, g.name),
       onSave: v => { L.setGroup(lid, code, v.name); App.dataChanged(); },
-      onDelete: code === '0' ? null : close => UI.confirm(`대분류 (${code}) ${g.name}을(를) 삭제할까요?`, '삭제', true).then(ok => {
+      onDelete: code === '0' ? null : close => UI.confirm(`카테고리 '${g.name}'을(를) 삭제할까요?${n ? `\n안의 세부 카테고리 ${n}개도 함께 지워집니다.` : ''}`, '삭제', true).then(ok => {
         if (!ok) return;
-        try { L.deleteGroup(lid, code); close(); App.dataChanged(); } catch (err) { UI.alert(err.message); }
+        try { L.deleteGroup(lid, code); close(); App.dataChanged(); UI.toast('삭제했습니다'); } catch (err) { UI.alert(err.message); }
       }) });
   }
   function addCat(g) {
     const lid = App.lid;
     const used = new Set(L.categories(lid).map(x => x.code));
     const free = U.CODE_CHARS.split('').map(ch => g + ch).filter(c => !used.has(c));
-    if (!free.length) { UI.alert('이 대분류에는 더 만들 수 있는 코드가 없습니다.'); return; }
-    UI.formSheet({ title: '소분류 추가', fields: [{ k: 'code', label: '계정코드', type: 'select', options: free.map(f => [f, f]) }, { k: 'name', label: '이름', type: 'text', req: true }],
+    if (!free.length) { UI.alert('이 카테고리에는 더 만들 수 있는 번호가 없습니다.'); return; }
+    UI.formSheet({ title: '세부 카테고리 추가', fields: [{ k: 'code', label: '번호', type: 'select', options: free.map(f => [f, f]) }, { k: 'name', label: '이름', type: 'text', req: true }],
       onSave: v => { L.setCategory(lid, v.code, v.name); App.dataChanged(); } });
+  }
+  /** 옮길 곳 고르기 목록: 같은 쪽(수입/지출) 먼저 */
+  function targetOptions(lid, code) {
+    const gm = L.groupMap(lid), inc = U.isIncomeCode(code);
+    const all = L.categories(lid).filter(c => c.code !== code);
+    return all.filter(c => U.isIncomeCode(c.code) === inc).concat(all.filter(c => U.isIncomeCode(c.code) !== inc))
+      .map(o => `<option value="${U.esc(o.code)}">${U.esc(gm[o.code.slice(0, 1)] || '')} › ${U.esc(o.name)} (${U.esc(o.code)})</option>`).join('');
   }
   function catSheet(code) {
     const lid = App.lid;
     const x = L.categories(lid).find(c => c.code === code);
     const use = L.categoryUsage(lid, code);
-    const others = L.categories(lid).filter(c => c.code !== code);
-    UI.formSheet({ title: `계정과목 ${code}`, fields: [{ k: 'name', label: '이름', type: 'text', req: true }], values: { name: x.name },
-      extra: `<div><div class="small muted">사용: 내역 ${use.entry}건 · 예약 ${use.recurring}건 · 예산 ${use.budget}건</div>
+    const used = use.entry || use.recurring || use.budget;
+    const useTxt = `내역 ${use.entry}건 · 고정 수입·지출 ${use.recurring}건 · 예산 ${use.budget}건`;
+    UI.formSheet({ title: `세부 카테고리 ${code}`, fields: [{ k: 'name', label: '이름', type: 'text', req: true }], values: { name: x.name },
+      extra: `<div>${emoRow(lid, code)}<div class="small muted">쓰인 곳: ${useTxt}</div>
         <div class="row wrap" style="margin-top:8px"><button class="btn sm" data-up>위로</button><button class="btn sm" data-dn>아래로</button></div>
-        <div class="section-t">다른 계정으로 합치기</div><div class="row"><select class="inp grow" data-to>${others.map(o => `<option value="${U.esc(o.code)}">${U.esc(o.code)} ${U.esc(o.name)}</option>`).join('')}</select><button class="btn sm" data-merge>합치기</button></div>
-        <div class="small muted">이 계정의 내역·예약·예산을 고른 계정으로 옮기고 이 계정은 지웁니다.</div></div>`,
+        <div class="section-t">다른 카테고리로 옮기기</div><div class="row"><select class="inp grow" data-to>${targetOptions(lid, code)}</select><button class="btn sm" data-merge>옮기기</button></div>
+        <div class="small muted">이 세부 카테고리의 내역·고정 수입·지출·예산을 고른 곳으로 옮기고 이것은 지웁니다.</div></div>`,
       afterOpen: sb => {
+        bindEmo(sb, lid, code, x.name);
         UI.$('[data-up]', sb).onclick = () => { L.moveCategoryOrder(lid, code, -1); App.dataChanged(); UI.toast('순서를 바꿨습니다'); };
         UI.$('[data-dn]', sb).onclick = () => { L.moveCategoryOrder(lid, code, 1); App.dataChanged(); UI.toast('순서를 바꿨습니다'); };
         UI.$('[data-merge]', sb).onclick = () => {
           const to = UI.$('[data-to]', sb).value;
           if (!to) return;
-          UI.confirm(`${code} ${x.name} → ${to} 로 합칠까요?`, '합치기', true).then(ok => {
+          UI.confirm(`'${x.name}' → ${UI.$('[data-to]', sb).selectedOptions[0].textContent} 로 옮길까요?`, '옮기기', true).then(ok => {
             if (!ok) return;
-            try { L.mergeCategory(lid, code, to); UI.closeTop(); App.dataChanged(); UI.toast('합쳤습니다'); } catch (err) { UI.alert(err.message); }
+            try { L.mergeCategory(lid, code, to); UI.closeTop(); App.dataChanged(); UI.toast('옮겼습니다'); } catch (err) { UI.alert(err.message); }
           });
         };
       },
       onSave: v => { L.setCategory(lid, code, v.name); App.dataChanged(); },
-      onDelete: close => UI.confirm(`계정 ${code} ${x.name}을(를) 삭제할까요?\n이 계정으로 입력한 내역 ${use.entry}건·예약 ${use.recurring}건·예산 ${use.budget}건도 함께 지워집니다.\n(내역을 남기려면 '다른 계정으로 합치기'를 쓰세요)`, '삭제', true).then(ok => {
-        if (ok) { L.deleteCategory(lid, code); close(); App.dataChanged(); }
-      }) });
+      onDelete: close => {
+        if (!used) {
+          UI.confirm(`세부 카테고리 '${x.name}'을(를) 삭제할까요?`, '삭제', true).then(ok => {
+            if (ok) { L.deleteCategory(lid, code); close(); App.dataChanged(); UI.toast('삭제했습니다'); }
+          });
+          return;
+        }
+        // 쓰인 곳이 있으면: 옮기고 삭제(내역은 남음) / 내역까지 삭제
+        const body = UI.el(`<div class="form"><div class="small" style="margin-bottom:8px">'${U.esc(x.name)}'에 ${useTxt}이 있습니다.</div>
+          <label class="check"><input type="radio" name="dm" value="move" checked> 다른 세부 카테고리로 옮기고 삭제 (내역은 남음)</label>
+          <select class="inp" data-to style="width:100%;margin:4px 0 10px">${targetOptions(lid, code)}</select>
+          <label class="check"><input type="radio" name="dm" value="all"> 내역까지 모두 삭제</label></div>`);
+        const to = UI.$('[data-to]', body);
+        UI.on(body, 'input[name=dm]', 'change', () => { to.disabled = UI.$('input[name=dm]:checked', body).value !== 'move'; });
+        UI.sheet({ title: '세부 카테고리 삭제', body, buttons: [{ label: '취소' }, { label: '삭제', cls: 'danger', onClick: () => {
+          if (UI.$('input[name=dm]:checked', body).value === 'move') {
+            if (!to.value) { UI.toast('옮길 곳이 없습니다'); return false; }
+            L.mergeCategory(lid, code, to.value);
+            close();
+            App.dataChanged();
+            UI.toast('옮기고 삭제했습니다');
+            return undefined;
+          }
+          UI.confirm(`'${x.name}'의 ${useTxt}까지 모두 지웁니다.\n(내역은 휴지통에 ${Trash.KEEP_DAYS}일 동안 보관되고, 고정 수입·지출·예산은 되돌릴 수 없습니다) 정말 지울까요?`, '모두 삭제', true).then(ok => {
+            if (!ok) return;
+            L.deleteCategory(lid, code);
+            UI.closeTop();
+            close();
+            App.dataChanged();
+            UI.toast('삭제했습니다');
+          });
+          return false;
+        } }] });
+      } });
   }
-  return { title: '계정과목', sticker: 'b08', sub: '대분류·소분류 편집', render, tab: 'more' };
+  return { title: '카테고리', sticker: 'b08', sub: '카테고리·세부 카테고리 편집', render, tab: 'more' };
 })();

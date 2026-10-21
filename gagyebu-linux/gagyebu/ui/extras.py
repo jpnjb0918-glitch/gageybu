@@ -7,12 +7,11 @@ import re
 
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QIcon, QImage, QImageReader, QPainter, QPixmap
-from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
                              QFileDialog, QFormLayout, QGroupBox, QLabel, QListView, QListWidget,
                              QListWidgetItem, QPlainTextEdit, QScrollArea, QSplitter, QTableWidgetItem, QTextBrowser,
                              QVBoxLayout, QWidget)
 
-from .. import db
 from .. import theme as T
 from ..services import assets as A
 from ..services import attach as AT
@@ -21,19 +20,14 @@ from ..services import insights as INS
 from ..services import ledger as L
 from ..services import reports as RP
 from ..services import smsparse as SMS
+from ..services.reports import settle_day
 from ..util import add_months, calc_money, fmt_money, is_income_code, month_end, settle_period, to_date
 from . import icons as I
-from .widgets import (CENTER, ID_ROLE, CodeCombo, DateEdit, FormDialog, MoneyEdit, MonthNav, button, cell, confirm,
-                      error, fill, h, info, make_table, money_cell, selected_ids, set_tone)
+from .widgets import (CENTER, CodeCombo, DateEdit, FormDialog, ID_ROLE, MoneyEdit, MonthNav, PayCombo, button, cell,
+                      confirm, error, fill, h, info, make_table, money_cell, ok_cancel, selected_id, selected_ids,
+                      set_tone)
 
 
-def settle_day(con):
-    return int(db.get_meta(con, 'settle_day', 1) or 1)
-
-
-def guess_code(con, lid, item, income=False):
-    """예전에 같은 품목으로 쓴 계정 → 가게 이름으로 짐작 → 가장 많이 쓴 지출 계정 (services/smsparse.guess_code)"""
-    return SMS.guess_code(con, lid, item, income)
 
 
 def alert_after(con, lid, code, date, before):
@@ -46,6 +40,20 @@ def alert_after(con, lid, code, date, before):
 
 def spent_before(con, lid, code, date):
     return INS.code_spent(con, lid, code, date, settle_day(con)) if code else 0
+
+
+def month_before(con, lid, date):
+    """그 달 지출 전체 (한 달 전체 예산 알림용, 1.8.0)"""
+    from ..services import money as M
+    return M.month_spent(con, lid, date, settle_day(con))
+
+
+def total_alert_after(con, lid, date, before):
+    from ..services import money as M
+    try:
+        return M.total_alert(con, lid, date, before, settle_day(con))
+    except Exception:        # 알림은 덤
+        return None
 
 
 # ── 막대 ───────────────────────────────────────────────
@@ -95,6 +103,50 @@ def _pct_text(pct):
     return '—' if pct is None else f'{pct}%'
 
 
+class WeekBars(QWidget):
+    """이번 주 월~일 날마다 쓴 돈 작은 막대 (1.8.0)"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.days, self.today = [], ''
+        self.setFixedHeight(46)
+        self.setMinimumWidth(140)
+
+    def set(self, days, today):
+        self.days, self.today = days, today
+        self.setToolTip('\n'.join(f"{'월화수목금토일'[i]} {d['date'][5:]}  {fmt_money(d['spent'])}원" for i, d in enumerate(days)))
+        self.update()
+
+    def paintEvent(self, _ev):
+        if not self.days:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pal = self.palette()
+        txt = pal.text().color()
+        track = QColor(T.mix(pal.base().color().name(), txt.name(), 0.10))
+        top = max([d['spent'] for d in self.days] + [1])
+        n = len(self.days)
+        w = self.width() / n
+        bh = self.height() - 16
+        f = p.font()
+        f.setPixelSize(10)
+        p.setFont(f)
+        for i, d in enumerate(self.days):
+            x = i * w + w * 0.22
+            bw = w * 0.56
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(track)
+            p.drawRoundedRect(QRectF(x, 0, bw, bh), 3, 3)
+            if d['spent'] > 0:
+                hh = max(3.0, bh * d['spent'] / top)
+                col = pal.highlight().color() if d['date'] != self.today else QColor(T.tone()['out'])
+                p.setBrush(col)
+                p.drawRoundedRect(QRectF(x, bh - hh, bw, hh), 3, 3)
+            p.setPen(txt if d['date'] != self.today else QColor(T.tone()['out']))
+            p.drawText(QRectF(i * w, bh + 1, w, 14), Qt.AlignmentFlag.AlignCenter, '월화수목금토일'[i])
+        p.end()
+
+
 # ── 예산 막대 (가계부 화면 오른쪽) ────────────────────────
 class BudgetCard(QGroupBox):
     """그 달 예산 진행 막대 + 하루에 쓸 수 있는 돈 + 무지출 날. [예산 정하기…] 로 바로 정함"""
@@ -115,17 +167,29 @@ class BudgetCard(QGroupBox):
         self.rows_lay = QVBoxLayout(self.rows)
         self.rows_lay.setContentsMargins(0, 2, 0, 2)
         self.rows_lay.setSpacing(3)
-        self.empty_lbl = set_tone(QLabel('아직 이달 예산이 없어요. 계정별로 정해 두면 얼마나 썼는지 막대로 보여 주고, '
+        self.empty_lbl = set_tone(QLabel('아직 이달 예산이 없어요. 한 달 전체나 카테고리별로 정해 두면 얼마나 썼는지 막대로 보여 주고, '
                                          '80%·100%를 넘을 때 알려 드려요.'), 'note')
         self.empty_lbl.setWordWrap(True)
         self.ns_lbl = QLabel()
         self.ns_lbl.setWordWrap(True)
+        self.week = QWidget()                      # 이번 주 (주간 예산, 1.8.0)
+        wl = QVBoxLayout(self.week)
+        wl.setContentsMargins(0, 4, 0, 0)
+        wl.setSpacing(2)
+        self.week_lbl = QLabel()
+        self.week_lbl.setWordWrap(True)
+        self.week_bar = Bar(8)
+        self.week_days = WeekBars()
+        wl.addWidget(self.week_lbl)
+        wl.addWidget(self.week_bar)
+        wl.addWidget(self.week_days)
         self.set_btn = button('예산 정하기…', self.edit)
         lay.addWidget(self.total_lbl)
         lay.addWidget(self.total_bar)
         lay.addWidget(self.sub_lbl)
         lay.addWidget(self.rows)
         lay.addWidget(self.empty_lbl)
+        lay.addWidget(self.week)
         lay.addWidget(self.ns_lbl)
         lay.addWidget(h(self.set_btn, 'stretch'))
 
@@ -136,10 +200,12 @@ class BudgetCard(QGroupBox):
         bp = INS.budget_progress(self.con, lid, y, m, sd, today)
         start, end = to_date(bp['start']), to_date(bp['end'])
         self.setTitle(f'{m}월 예산' + (f'  ({start:%m.%d}~{end:%m.%d})' if sd != 1 else ''))
-        has = bool(bp['rows'])
+        has = bool(bp['rows']) or bp.get('total', False)
         for w in (self.total_lbl, self.total_bar, self.sub_lbl, self.rows):
             w.setVisible(has)
-        self.empty_lbl.setVisible(not has)
+        from ..services import money as M
+        wb = M.week_budget(self.con, lid)
+        self.empty_lbl.setVisible(not has and not wb)
         while self.rows_lay.count():
             it = self.rows_lay.takeAt(0)
             if it.widget():
@@ -147,7 +213,7 @@ class BudgetCard(QGroupBox):
         if has:
             tn = T.tone()
             over = bp['left'] < 0
-            self.total_lbl.setText(f"<b>{fmt_money(bp['spent'])}</b> / {fmt_money(bp['budget'])}원 "
+            self.total_lbl.setText(('전체 예산 ' if bp.get('total') else '') + f"<b>{fmt_money(bp['spent'])}</b> / {fmt_money(bp['budget'])}원 "
                                    f"<span style='color:{tn['out'] if over else tn['text2']}'>({_pct_text(bp['pct'])})</span>")
             self.total_bar.set(bp['pct'])
             if over:
@@ -172,7 +238,21 @@ class BudgetCard(QGroupBox):
                 self.rows_lay.addWidget(w)
             more = len(bp['rows']) - self.MAX_ROWS
             if more > 0:
-                self.rows_lay.addWidget(set_tone(QLabel(f'외 {more}개 — 결산 보고서 › 이달 리포트에서 모두 보기'), 'note'))
+                self.rows_lay.addWidget(set_tone(QLabel(f'외 {more}개 — 통계 › 이달 리포트에서 모두 보기'), 'note'))
+        # 이번 주 (주간 예산을 정했으면, 보고 있는 달에 오늘이 들어 있을 때)
+        if wb and start <= today <= end:
+            wk = M.week_progress(self.con, lid, today, today)
+            tn = T.tone()
+            over = wk['left'] < 0
+            self.week_lbl.setText(f"이번 주 ({to_date(wk['start']):%m.%d}~{to_date(wk['end']):%m.%d}) <b>{fmt_money(wk['spent'])}</b>"
+                                  f" / {fmt_money(wk['budget'])}원 <span style='color:{tn['out'] if over else tn['text2']}'>"
+                                  + (f"({fmt_money(-wk['left'])}원 넘음)" if over else
+                                     f"(남은 돈 {fmt_money(wk['left'])} · 하루 {fmt_money(wk['per_day'])})") + '</span>')
+            self.week_bar.set(wk['pct'])
+            self.week_days.set(wk['days'], today.isoformat())
+            self.week.setVisible(True)
+        else:
+            self.week.setVisible(False)
         # 무지출 날
         if start <= today:
             upto = min(end, today)
@@ -203,7 +283,7 @@ class BudgetDialog(QDialog):
         prev_spent = {c: v for c, v in RP._sum_by_code(con, lid, ps, pe).items()}
         cur = RP.budgets(con, lid, f'{y:04d}-{m:02d}')
         self.prev_bud = RP.budgets(con, lid, f'{py:04d}-{pm:02d}')
-        self.table = make_table(['계정과목', f'지난달({pm}월) 쓴 돈', f'{m}월 예산'], stretch=0)
+        self.table = make_table(['카테고리', f'지난달({pm}월) 쓴 돈', f'{m}월 예산'], stretch=0)
         self.edits = {}
         cats = [c for c in L.categories(con, lid) if not is_income_code(c['code'])]
         self.table.setRowCount(len(cats))
@@ -221,17 +301,22 @@ class BudgetDialog(QDialog):
         if m < 12:
             self.span.addItem(f'{m}월부터 12월까지 같게', 13 - m)
         self.span.addItem(f'{m}월부터 12달 동안 같게', 12)
+        from ..services import money as M          # 한 달 전체 예산 · 주간 예산 (1.8.0)
+        self.month_total = MoneyEdit()
+        self.month_total.set_value(M.total_budget(con, lid, f'{y:04d}-{m:02d}'))
+        self.week_total = MoneyEdit()
+        self.week_total.set_value(M.week_budget(con, lid))
         self.total = QLabel()
         for e in self.edits.values():
             e.editingFinished.connect(self._sum)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        bb.button(QDialogButtonBox.StandardButton.Save).setText('저장')
-        bb.button(QDialogButtonBox.StandardButton.Cancel).setText('취소')
-        bb.accepted.connect(self._ok)
-        bb.rejected.connect(self.reject)
+        bb = ok_cancel(self, '저장', self._ok)
         lay = QVBoxLayout(self)
-        lay.addWidget(set_tone(QLabel('쓰지 않을 계정은 비워 두세요. 금액 칸에 계산식(예: 300000/4)도 됩니다.'
-                                      + (f'  결산일 {sd}일 기준 기간으로 셉니다.' if sd != 1 else '')), 'note'))
+        top = QFormLayout()
+        top.addRow('한 달 전체 예산', h(self.month_total, set_tone(QLabel('카테고리를 나누지 않고 한 달에 쓸 돈 (비우면 안 씀)'), 'note'), 'stretch'))
+        top.addRow('주간 예산 (매주)', h(self.week_total, set_tone(QLabel('월~일 한 주에 쓸 돈 (비우면 안 씀)'), 'note'), 'stretch'))
+        lay.addLayout(top)
+        lay.addWidget(set_tone(QLabel('카테고리별 예산 — 쓰지 않을 카테고리는 비워 두세요. 금액 칸에 계산식(예: 300000/4)도 됩니다.'
+                                      + (f'  월 시작일 {sd}일 기준 기간으로 셉니다.' if sd != 1 else '')), 'note'))
         lay.addWidget(self.table, 1)
         lay.addWidget(h(button('지난달 예산 가져오기', self._copy_prev), button('모두 비우기', self._clear), 'stretch',
                         self.total))
@@ -265,10 +350,11 @@ class BudgetDialog(QDialog):
     def _ok(self):
         try:
             vals = self._vals()
+            mt, wt = self.month_total.value(), self.week_total.value()
         except ValueError:
             error(self, '금액은 숫자(또는 계산식)로 입력하세요.')
             return
-        if any(v < 0 for v in vals.values()):
+        if any(v < 0 for v in vals.values()) or mt < 0 or wt < 0:
             error(self, '예산은 0 이상으로 입력하세요.')
             return
         n = self.span.currentData()
@@ -278,6 +364,9 @@ class BudgetDialog(QDialog):
             yms.append(f'{y:04d}-{m:02d}')
             y, m = add_months(y, m, 1)
         RP.set_budgets(self.con, self.lid, yms, vals)
+        from ..services import money as M
+        M.set_total_budget(self.con, self.lid, yms, mt)
+        M.set_week_budget(self.con, self.lid, wt)
         self.accept()
 
 
@@ -286,7 +375,7 @@ SMS_HINT = ('[Web발신]\n신한카드(1234)승인 홍*동 12,500원 일시불 1
             '[Web발신]\nKB국민카드 3*0*승인 홍*동 45,000원 일시불 10/18 19:02 교촌치킨')
 _EDITABLE = (QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed
              | QAbstractItemView.EditTrigger.AnyKeyPressed | QAbstractItemView.EditTrigger.SelectedClicked)
-C_CHK, C_DATE, C_ITEM, C_IN, C_OUT, C_CODE, C_MEMO = range(7)
+C_CHK, C_DATE, C_ITEM, C_IN, C_OUT, C_CODE, C_MEMO, C_PAY = range(8)
 
 
 def looks_like_sms(text):
@@ -304,7 +393,7 @@ class SmsDialog(QDialog):
         self.text.setPlaceholderText('카드·은행 알림 문자를 복사해서 여기에 붙여넣으세요. 여러 개를 한꺼번에 넣어도 됩니다.\n\n'
                                      '예)\n' + SMS_HINT)
         self.text.setMinimumHeight(110)
-        self.table = make_table(['넣기', '날짜', '품목', '수입', '지출', '계정과목', '메모'], stretch=C_MEMO)
+        self.table = make_table(['넣기', '날짜', '내용', '수입', '지출', '카테고리', '메모', '결제수단'], stretch=C_MEMO)
         self.table.setEditTriggers(_EDITABLE)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.status = set_tone(QLabel('붙여넣은 뒤 [읽기]를 누르세요.'), 'note')
@@ -357,7 +446,7 @@ class SmsDialog(QDialog):
         self.table.setRowCount(len(found))
         n_ok = n_dup = 0
         for i, p in enumerate(found):
-            e = SMS.to_entry(p)
+            e = SMS.to_entry(p, self.con)            # 결제수단도 짐작 (은행 → 계좌이체, 넣어 둔 카드 → 그 카드)
             dup = bool(p['ok']) and self._dup(e)
             ok = bool(p['ok']) and not dup
             n_ok += ok
@@ -373,9 +462,13 @@ class SmsDialog(QDialog):
             self.table.setItem(i, C_OUT, money_cell(e['expense'], 'out'))
             combo = CodeCombo(self.con)
             combo.load(self.lid)
-            combo.set_code(guess_code(self.con, self.lid, p['item'], p['kind'] == 'in'))
+            combo.set_code(SMS.guess_code(self.con, self.lid, p['item'], p['kind'] == 'in'))
             self.table.setCellWidget(i, C_CODE, combo)
             self.table.setItem(i, C_MEMO, cell(e['memo']))
+            pc = PayCombo(self.con)
+            pc.load()
+            pc.set_pay(e['pay'])
+            self.table.setCellWidget(i, C_PAY, pc)
             for c in (C_CHK, C_CODE):
                 it = self.table.item(i, c)
                 if it is not None:
@@ -403,13 +496,14 @@ class SmsDialog(QDialog):
         except ValueError:
             raise ValueError(f'{i + 1}번째 줄: 금액은 숫자로 입력하세요.')
         if not t(C_ITEM):
-            raise ValueError(f'{i + 1}번째 줄: 품목을 입력하세요.')
+            raise ValueError(f'{i + 1}번째 줄: 내용을 입력하세요.')
         if not inc and not exp:
             raise ValueError(f'{i + 1}번째 줄: 수입 또는 지출 금액을 입력하세요.')
         code = self.table.cellWidget(i, C_CODE).code()
         if not code:
-            raise ValueError(f'{i + 1}번째 줄: 계정과목을 고르세요.')
-        return {'date': d, 'item': t(C_ITEM), 'income': inc, 'expense': exp, 'code': code, 'memo': t(C_MEMO)}
+            raise ValueError(f'{i + 1}번째 줄: 카테고리를 고르세요.')
+        return {'date': d, 'item': t(C_ITEM), 'income': inc, 'expense': exp, 'code': code, 'memo': t(C_MEMO),
+                'pay': self.table.cellWidget(i, C_PAY).pay()}
 
     def _save(self):
         rows = [i for i in range(self.table.rowCount())
@@ -425,10 +519,12 @@ class SmsDialog(QDialog):
         alerts = []
         for v in vals:
             before = spent_before(self.con, self.lid, v['code'], v['date'])
+            before_m = month_before(self.con, self.lid, v['date'])
             L.add_entry(self.con, self.lid, v)
-            a = alert_after(self.con, self.lid, v['code'], v['date'], before)
-            if a and a not in alerts:
-                alerts.append(a)
+            for a in (alert_after(self.con, self.lid, v['code'], v['date'], before),
+                      total_alert_after(self.con, self.lid, v['date'], before_m)):
+                if a and a not in alerts:
+                    alerts.append(a)
         self.saved, self.alerts = len(vals), alerts
         self.accept()
 
@@ -445,7 +541,7 @@ class FavoritesDialog(QDialog):
         super().__init__(parent)
         self.con, self.lid = con, lid
         self.setWindowTitle('자주 쓰는 내역 정리')
-        self.table = make_table(['품목', '수입', '지출', '계정과목', '메모'], stretch=4)
+        self.table = make_table(['내용', '수입', '지출', '카테고리', '메모', '결제수단'], stretch=4)
         lay = QVBoxLayout(self)
         lay.addWidget(set_tone(QLabel('가계부 입력 상자의 [★ 자주 쓰는 내역]에서 고르면 칸이 한 번에 채워집니다. '
                                       '새로 넣으려면 입력 칸을 채운 뒤 [지금 입력을 자주 쓰는 내역에 넣기].'), 'note'))
@@ -457,9 +553,12 @@ class FavoritesDialog(QDialog):
 
     def load(self, sel=None):
         cmap = L.category_map(self.con, self.lid)
+        from ..services import money as M
+        pmap = M.pay_map(self.con)
         rows = L.favorites(self.con, self.lid)
         fill(self.table, [[cell(f['item'], data=f['id']), money_cell(f['income'], 'in'), money_cell(f['expense'], 'out'),
-                           cell(L.code_label(cmap, f['code']) if f['code'] else ''), cell(f['memo'])] for f in rows])
+                           cell(L.code_label(cmap, f['code']) if f['code'] else ''), cell(f['memo']),
+                           cell(M.pay_label(pmap, f['pay']))] for f in rows])
         for r, f in enumerate(rows):
             if f['id'] == sel:
                 self.table.selectRow(r)
@@ -679,11 +778,7 @@ class TransferDialog(QDialog):
         f.addRow('날짜', self.date)
         f.addRow('금액', self.amount)
         f.addRow('메모', self.memo)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        bb.button(QDialogButtonBox.StandardButton.Ok).setText('이체 기록')
-        bb.button(QDialogButtonBox.StandardButton.Cancel).setText('취소')
-        bb.accepted.connect(self._ok)
-        bb.rejected.connect(self.reject)
+        bb = ok_cancel(self, '이체 기록', self._ok)
         lay = QVBoxLayout(self)
         lay.addWidget(set_tone(QLabel('보내는 통장에 출금, 받는 통장에 입금이 짝으로 기록됩니다. 가계부(수입·지출)에는 넣지 않아\n'
                                       '이달 지출이 부풀지 않아요. 한쪽을 고치거나 지우면 짝도 같이 바뀝니다.'), 'note'))
@@ -757,8 +852,7 @@ class GoalsTab(QWidget):
         QVBoxLayout(self).addWidget(sp)
 
     def gid(self):
-        ids = selected_ids(self.list)
-        return ids[0] if ids else None
+        return selected_id(self.list)
 
     def refresh(self):
         cur = self.gid()
@@ -914,8 +1008,7 @@ class DebtsTab(QWidget):
         QVBoxLayout(self).addWidget(sp)
 
     def did(self):
-        ids = selected_ids(self.list)
-        return ids[0] if ids else None
+        return selected_id(self.list)
 
     def refresh(self):
         cur = self.did()
@@ -1048,7 +1141,7 @@ def insight_html(con, lid, y, m, sd, today=None):
     start, end = to_date(i['start']), to_date(i['end'])
     per = f'{start:%Y.%m.%d} ~ {end:%m.%d}'
     parts = [f"<h2 style='margin:0'>{y}년 {m}월 리포트</h2><p style='color:{mute};margin-top:2px'>{per}"
-             + (f' · 결산일 {sd}일 기준' if sd != 1 else '') + '</p>']
+             + (f' · 월 시작일 {sd}일 기준' if sd != 1 else '') + '</p>']
     if not i['days']:
         parts.append('<p>아직 시작하지 않은 달입니다.</p>')
         return ''.join(parts)
@@ -1081,9 +1174,21 @@ def insight_html(con, lid, y, m, sd, today=None):
             parts.append(f"<tr><td>{n}.</td><td><b>{e(t['name'])}</b></td><td align='right'>{f(t['amount'])}원</td>"
                          f"<td>{ch}</td></tr>")
         parts.append('</table>')
+    from .money_ui import fixed_html             # 고정비 한눈에 (1.8.0)
+    from ..services import money as M
+    parts.append('<h3>고정 수입·지출</h3><p>' + fixed_html(con, lid, y, m, sd, today) + '</p>')
+    perf = [p for p in M.card_perf(con, y, m) if p['target']]
+    if perf:
+        parts.append(f"<h3>카드 실적 <span style='font-size:small;color:{mute}'>(1일~말일, 모든 가계부)</span></h3><table cellpadding='3'>")
+        for p in perf:
+            done = p['spent'] >= p['target']
+            parts.append(f"<tr><td>{e(p['label'])}</td><td align='right'>{f(p['spent'])}</td><td>/ {f(p['target'])}</td>"
+                         + (f"<td style='color:{inc}'><b>채움 ✓</b></td>" if done else
+                            f"<td>{_pct_text(p['pct'])} · {f(p['left'])}원 남음</td>") + '</tr>')
+        parts.append('</table>')
     bp = i['budget']
-    if bp['rows']:
-        parts.append(f"<h3>예산</h3><p>{f(bp['spent'])} / {f(bp['budget'])}원 ({_pct_text(bp['pct'])})"
+    if bp['rows'] or bp.get('total'):
+        parts.append(f"<h3>예산</h3><p>{'전체 예산 ' if bp.get('total') else ''}{f(bp['spent'])} / {f(bp['budget'])}원 ({_pct_text(bp['pct'])})"
                      + (f" · 남은 돈 {f(bp['left'])}원" if bp['left'] >= 0 else
                         f" · <b style='color:{out}'>{f(-bp['left'])}원 넘음</b>") + '</p><table cellpadding="3">')
         for r in bp['rows']:
@@ -1131,7 +1236,7 @@ class TagTab(QWidget):
         self.all_chk.toggled.connect(lambda *_: self.refresh())
         self.table = make_table(['태그', '건수', '수입', '지출'], stretch=0)
         self.table.cellDoubleClicked.connect(self._open)
-        self.detail = make_table(['날짜', '품목', '수입', '지출', '계정과목', '메모'], stretch=5)
+        self.detail = make_table(['날짜', '내용', '수입', '지출', '카테고리', '메모'], stretch=5)
         self.detail_lbl = QLabel()
         sp = QSplitter()
         sp.addWidget(self.table)
@@ -1144,7 +1249,7 @@ class TagTab(QWidget):
         sp.setStretchFactor(1, 2)
         self.table.itemSelectionChanged.connect(self._sel)
         lay = QVBoxLayout(self)
-        lay.addWidget(h(self.nav, self.all_chk, set_tone(QLabel('품목이나 메모에 #여행 #회사 처럼 쓰면 계정과 따로 모아 봅니다.'), 'note'),
+        lay.addWidget(h(self.nav, self.all_chk, set_tone(QLabel('내용이나 메모에 #여행 #회사 처럼 쓰면 카테고리와 따로 모아 봅니다.'), 'note'),
                         'stretch'))
         lay.addWidget(sp, 1)
 
@@ -1165,15 +1270,14 @@ class TagTab(QWidget):
             if r['tag'] == cur:
                 self.table.selectRow(i)
         if not rows:
-            self.detail_lbl.setText('아직 태그를 쓴 내역이 없어요. 품목이나 메모에 #여행 처럼 써 보세요.')
+            self.detail_lbl.setText('아직 태그를 쓴 내역이 없어요. 내용이나 메모에 #여행 처럼 써 보세요.')
             fill(self.detail, [])
         elif not self._tag():
             self.table.selectRow(0)
         self._sel()
 
     def _tag(self):
-        ids = selected_ids(self.table)
-        return ids[0] if ids else None
+        return selected_id(self.table)
 
     def _sel(self):
         tag = self._tag()

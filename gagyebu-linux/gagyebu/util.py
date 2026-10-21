@@ -2,6 +2,7 @@
 import calendar
 import datetime as dt
 import hashlib
+import math
 import os
 import re
 
@@ -110,8 +111,9 @@ def calc_money(s):
     return v
 
 
-def today():
-    return dt.date.today()
+def pct(a, b):
+    """a/b 를 % 로 (0.5 는 올림). b<=0 이면 None — 안드로이드판 U.pct 와 같음"""
+    return math.floor(a * 100 / b + 0.5) if b > 0 else None
 
 
 def to_date(s):

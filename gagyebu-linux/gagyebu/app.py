@@ -74,6 +74,14 @@ class MainWindow(QMainWindow):
         self.db_path = db_path
         self.con = db.ConProxy(db.connect(db_path))
         L.ensure_default_ledgers(self.con)            # 생활비·용돈·비상금·여행 장부 (자료 파일마다 한 번만)
+        from .services import trash as TR
+        TR.purge(self.con)                             # 휴지통: 30일 지난 것 지우기 (1.8.0)
+        if not db.get_meta(self.con, 'cat_emoji_init'):  # 카테고리 그림: 1.8.0 을 처음 열 때 한 번 이름 보고 넣어 둠
+            from .services import catemoji as E
+            for led in L.ledgers(self.con):
+                E.fill_defaults(self.con, led['id'])
+            db.set_meta(self.con, 'cat_emoji_init', '1')
+            self.con.commit()
         self.lid = L.first_ledger_id(self.con)
         self.setWindowTitle(f'우리집 가계부 ({EDITION} {__version__})')
         self.setWindowIcon(QIcon(TH.ICON))
@@ -83,7 +91,7 @@ class MainWindow(QMainWindow):
         self.resize(min(1440, avail.width()) if avail else 1440, min(880, avail.height()) if avail else 880)
 
         # ── 맨 위 줄: [TODAY|이달] ☆ 제목 ☆  ~~전광판~~  장부: [▼] ──
-        self.ledger_lbl = QLabel('장부:')
+        self.ledger_lbl = QLabel('가계부:')
         self.ledger_lbl.setObjectName('LedgerLabel')
         self.ledger_combo = QComboBox()
         self.ledger_combo.setMinimumWidth(200)
@@ -229,7 +237,7 @@ class MainWindow(QMainWindow):
         self.hompy_title.setText('☆ 우리집 가계부 ☆' if retro else '우리집 가계부')
         self.marquee.setVisible(retro)
         self.marquee.set_running(retro and TH.pref('marquee'))
-        self.ledger_lbl.setText('장부:' if retro else ' 장부: ')
+        self.ledger_lbl.setText('가계부:' if retro else ' 가계부: ')
         self.ledger_lbl.setVisible(not sns)
         self._place_rail(theme)
         # 탭: 미니홈피는 틀 오른쪽에 붙은 탭, 기본은 왼쪽 목록
@@ -400,8 +408,8 @@ class MainWindow(QMainWindow):
         for r in L.ledgers(self.con):
             self.ledger_combo.addItem(r['name'], r['id'])
         self.ledger_combo.insertSeparator(self.ledger_combo.count())
-        self.ledger_combo.addItem('＋ 새 장부 만들기…', self.NEW_LEDGER)      # 목록에서 바로 새 장부
-        self.ledger_combo.addItem('장부 관리…', self.MANAGE_LEDGERS)
+        self.ledger_combo.addItem('＋ 새 가계부 만들기…', self.NEW_LEDGER)      # 목록에서 바로 새 장부
+        self.ledger_combo.addItem('가계부 관리…', self.MANAGE_LEDGERS)
         if self.ledger_combo.findData(self.lid) < 0:
             self.lid = L.first_ledger_id(self.con)
         self.ledger_combo.setCurrentIndex(max(0, self.ledger_combo.findData(self.lid)))
@@ -411,8 +419,8 @@ class MainWindow(QMainWindow):
         """새 장부: 이름과 만드는 방법(빈 장부 / 지금 장부의 계정과목만 / 통째로 복사) → 만들고 그 장부로"""
         from .ui.widgets import FormDialog, run_dialog
         cur = self.ledger_name().replace('|', '/')       # 고르기 칸 구분자와 겹치지 않게
-        how = ['빈 장부 (대분류 수입만)', f'지금 장부({cur})의 계정과목만 복사', '지금 장부를 통째로 복사']
-        dlg = FormDialog(self, '새 장부', [('name', '장부 이름', 'text*'), ('how', '만드는 방법', 'choice:' + '|'.join(how))],
+        how = ['빈 가계부 (수입 카테고리만)', f'지금 가계부({cur})의 카테고리만 복사', '지금 가계부를 통째로 복사']
+        dlg = FormDialog(self, '새 가계부', [('name', '가계부 이름', 'text*'), ('how', '만드는 방법', 'choice:' + '|'.join(how))],
                          {'how': 1})
         if run_dialog(dlg) != QDialog.DialogCode.Accepted:
             return None
@@ -426,7 +434,7 @@ class MainWindow(QMainWindow):
         self.reload_ledgers()
         self.reset_edit_state()
         self.data_changed()
-        self.statusBar().showMessage(f"새 장부 '{name}'을(를) 만들었습니다.", 5000)
+        self.statusBar().showMessage(f"새 가계부 '{name}'을(를) 만들었습니다.", 5000)
         return lid
 
     def manage_ledgers(self):

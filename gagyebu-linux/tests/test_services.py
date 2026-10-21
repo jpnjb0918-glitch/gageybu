@@ -96,8 +96,16 @@ class TestLedger(Base):
     def test_group_rules(self):
         with self.assertRaises(ValueError):
             L.delete_group(self.con, self.lid, '0')
+        self.add('2026-01-10', '점심', exp=9000, code='31')
+        L.save_favorite(self.con, self.lid, {'item': '커피', 'expense': 4500, 'code': '30'})
         with self.assertRaises(ValueError):
-            L.delete_group(self.con, self.lid, '3')        # 소분류가 있음
+            L.delete_group(self.con, self.lid, '3')        # 세부 카테고리 31 에 내역이 있음
+        L.merge_category(self.con, self.lid, '31', '80')    # 옮긴 뒤에는
+        L.delete_group(self.con, self.lid, '3')            # 안 쓰인 세부 카테고리(30)와 함께 지워짐
+        self.assertNotIn('3', L.group_map(self.con, self.lid))
+        self.assertEqual([c for c in L.category_map(self.con, self.lid) if c[0] == '3'], [])
+        self.assertEqual(L.favorites(self.con, self.lid)[0]['code'], '')     # 자주 쓰는 내역은 카테고리만 비움
+        self.assertEqual(L.category_usage(self.con, self.lid, '80')['entry'], 1)
         L.set_group(self.con, self.lid, '0', '용돈')
         self.assertEqual(L.group_map(self.con, self.lid)['0'], '수입')   # 0번은 이름 고정
 

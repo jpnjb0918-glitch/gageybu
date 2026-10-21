@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (QDialog, QHeaderView, QInputDialog, QLabel, QSpinBo
                              QWidget)
 
 from .. import db
+from ..services import catemoji as E
 from ..services import ledger as L
 from ..services import reports as RP
 from ..util import fmt_money, parse_money
@@ -42,7 +43,7 @@ class ReportView(QWidget):
     def __init__(self, on_cell=None):
         super().__init__()
         self.report, self.on_cell = None, on_cell
-        self.table = make_table(['대분류', '소분류'])
+        self.table = make_table(['카테고리', '세부 카테고리'])
         self.delegate = ReportDelegate(self.table)
         self.table.setItemDelegate(self.delegate)
         self.table.cellDoubleClicked.connect(self._dbl)
@@ -81,20 +82,24 @@ class ReportView(QWidget):
         for c, wd in enumerate(nat):
             hh.resizeSection(c, wd)
 
-    def show_report(self, rep):
+    def show_report(self, rep, emap=None):
+        """emap: 카테고리 그림 {번호: 그림} (1.8.0) — 카테고리·세부 카테고리 이름 앞에"""
         self.report = rep
+        emap = emap or {}
+        deco = (lambda code, name: E.deco(emap, code, name)) if emap else (lambda code, name: name)
         t = self.table
         t.clearSpans()
         t.setColumnCount(2 + len(rep.columns))
-        t.setHorizontalHeaderLabels(['대분류', '소분류'] + rep.columns)
+        t.setHorizontalHeaderLabels(['카테고리', '세부 카테고리'] + rep.columns)
         t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         rows = []
         for r in rep.rows:
             bg = SUBTOTAL_BG if r.kind == 'subtotal' else FOOTER_BG if r.kind == 'footer' else None
             bold = r.kind != 'cat'
-            rows.append([cell(r.group if r.kind != 'footer' else r.label, CENTER, bg=bg if r.kind == 'footer' else GROUP_BG,
-                              bold=True),
-                         cell(r.label if r.kind != 'footer' else '', bg=bg, bold=bold)] +
+            rows.append([cell(deco(r.code[:1], r.group) if r.kind != 'footer' else r.label, CENTER,
+                              bg=bg if r.kind == 'footer' else GROUP_BG, bold=True),
+                         cell((deco(r.code, r.label) if r.kind == 'cat' else r.label) if r.kind != 'footer' else '',
+                              bg=bg, bold=bold)] +
                         [money_cell(v, blank_zero=False, bg=bg, bold=bold) for v in r.values])
         fill(t, rows)
         kinds = [r.kind for r in rep.rows]
@@ -135,7 +140,7 @@ class DetailDialog(QDialog):
         from ..services import order as O
         rows = O.apply_day_order(rows, O.day_orders(con, lid))
         cmap = L.category_map(con, lid)
-        t = make_table(['날짜', '품목', '수입', '지출', '계정과목', '메모'], stretch=5)
+        t = make_table(['날짜', '내용', '수입', '지출', '카테고리', '메모'], stretch=5)
         fill(t, [[cell(r['date'], CENTER), cell(r['item']), money_cell(r['income'], 'in'),
                   money_cell(r['expense'], 'out'), cell(L.code_label(cmap, r['code'])), cell(r['memo'])] for r in rows])
         lay = QVBoxLayout(self)
@@ -160,7 +165,7 @@ class _Tab(QWidget):
 
 
 class ReportsPage(QWidget):
-    title = '결산 보고서'
+    title = '통계'
 
     def __init__(self, app):
         super().__init__()
@@ -169,13 +174,13 @@ class ReportsPage(QWidget):
         self.settle = QSpinBox()
         self.settle.setRange(1, 31)
         self.settle.setSuffix('일')
-        self.settle.setToolTip('결산일: 5일이면 매달 5일 ~ 다음달 4일을 한 달로 계산')
+        self.settle.setToolTip('월 시작일: 5일이면 매달 5일 ~ 다음달 4일을 한 달로 계산')
         self.settle.valueChanged.connect(self._settle_changed)
         self.tabs = QTabWidget()
 
         self.m_nav = MonthNav()
         self.m_nav.changed.connect(lambda *_: self.refresh())
-        self.t_month = _Tab(self, [self.m_nav, QLabel('결산일'), self.settle], self._month_cell)
+        self.t_month = _Tab(self, [self.m_nav, QLabel('월 시작일'), self.settle], self._month_cell)
         self.y_spin = _year_spin(t.year)
         self.y_spin.valueChanged.connect(lambda *_: self.refresh())
         self.settle2 = QLabel()
@@ -185,23 +190,27 @@ class ReportsPage(QWidget):
         self.t_daily = _Tab(self, [self.d_nav], self._daily_cell)
         self.c_start, self.c_end = DateEdit(dt.date(t.year, 1, 1)), DateEdit(t)
         self.t_custom = _Tab(self, [QLabel('기간'), self.c_start, QLabel('~'), self.c_end,
-                                    button('결산', self.refresh)], self._custom_cell)
+                                    button('보기', self.refresh)], self._custom_cell)
         self.b_spin = _year_spin(t.year)
         self.b_spin.valueChanged.connect(lambda *_: self.refresh())
         self.t_budget = _Tab(self, [QLabel('연도'), self.b_spin], self._budget_cell)
         from .extras import InsightTab, TagTab
+        from .money_ui import PayStatTab, SavingsTab, WeekStatTab
         self.t_insight = InsightTab(self)
         self.t_tags = TagTab(self)
-        for tab, name in ((self.t_month, '월결산'), (self.t_year, '년결산'), (self.t_daily, '월별 일일결산'),
-                          (self.t_custom, '사용자정의 결산'), (self.t_budget, '년예산'), (self.t_insight, '이달 리포트'),
-                          (self.t_tags, '태그')):
+        self.t_week = WeekStatTab(self)            # 1.8.0
+        self.t_pay = PayStatTab(self)
+        self.t_save = SavingsTab(self)
+        for tab, name in ((self.t_month, '월별'), (self.t_year, '연간'), (self.t_daily, '일별'), (self.t_week, '주별'),
+                          (self.t_custom, '기간'), (self.t_budget, '예산'), (self.t_save, '저축'), (self.t_pay, '결제수단'),
+                          (self.t_insight, '이달 리포트'), (self.t_tags, '태그')):
             self.tabs.addTab(tab, name)
         self.tabs.currentChanged.connect(lambda *_: self.refresh())
         lay = QVBoxLayout(self)
         lay.addWidget(self.tabs)
 
     def sd(self):
-        return int(db.get_meta(self.con, 'settle_day', 1) or 1)
+        return RP.settle_day(self.con)
 
     def _settle_changed(self, v):
         db.set_meta(self.con, 'settle_day', v)
@@ -213,26 +222,25 @@ class ReportsPage(QWidget):
         self.settle.blockSignals(True)
         self.settle.setValue(sd)
         self.settle.blockSignals(False)
-        self.settle2.setText(f'(결산일 {sd}일 — 월결산 탭에서 변경)')
-        i = self.tabs.currentIndex()
-        if i == 0:
-            self.t_month.view.show_report(RP.monthly(self.con, lid, self.m_nav.y, self.m_nav.m, sd))
-        elif i == 1:
-            self.t_year.view.show_report(RP.yearly(self.con, lid, self.y_spin.value(), sd))
-        elif i == 2:
-            self.t_daily.view.show_report(RP.daily(self.con, lid, self.d_nav.y, self.d_nav.m))
-        elif i == 3:
+        self.settle2.setText(f'(월 시작일 {sd}일 — 월별 탭에서 변경)')
+        w = self.tabs.currentWidget()
+        emap = E.emoji_map(self.con, lid)
+        if w is self.t_month:
+            self.t_month.view.show_report(RP.monthly(self.con, lid, self.m_nav.y, self.m_nav.m, sd), emap)
+        elif w is self.t_year:
+            self.t_year.view.show_report(RP.yearly(self.con, lid, self.y_spin.value(), sd), emap)
+        elif w is self.t_daily:
+            self.t_daily.view.show_report(RP.daily(self.con, lid, self.d_nav.y, self.d_nav.m), emap)
+        elif w is self.t_custom:
             s, e = self.c_start.date_(), self.c_end.date_()
             if s > e:
                 error(self, '시작일이 종료일보다 늦습니다.')
                 return
-            self.t_custom.view.show_report(RP.custom(self.con, lid, s, e))
-        elif i == 4:
-            self.t_budget.view.show_report(RP.budget_year(self.con, lid, self.b_spin.value()))
-        elif i == 5:
-            self.t_insight.refresh()
-        else:
-            self.t_tags.refresh()
+            self.t_custom.view.show_report(RP.custom(self.con, lid, s, e), emap)
+        elif w is self.t_budget:
+            self.t_budget.view.show_report(RP.budget_year(self.con, lid, self.b_spin.value()), emap)
+        elif hasattr(w, 'refresh'):
+            w.refresh()
 
     # ── 칸 두 번 누르기 ──
     def _detail(self, row, period):

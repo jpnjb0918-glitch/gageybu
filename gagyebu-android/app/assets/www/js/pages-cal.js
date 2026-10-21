@@ -14,11 +14,14 @@ Pages.calendar = (() => {
     const ab = UI.el('<button class="btn sm">기념일</button>');
     ab.onclick = () => App.go('anniv', {}, true);
     tools.appendChild(ab);
+    const moneyOn = App.pref('cal_money') !== 'false';     // 카드 결제일·고정 수입·지출 미리 보기 (1.8.0)
     c.appendChild(UI.monthNav(s.y, s.m, (y, m) => { s.y = y; s.m = m; App.render(); }));
     const grid = Cal.monthGrid(s.y, s.m);
     const g0 = grid[0][0], g1 = grid[5][6];
     const sch = Cal.schedules(g0, g1);
     const ann = Cal.anniversariesBetween(g0, g1);
+    const today0 = U.today();
+    const mev = moneyOn ? MCal.events(lid, g0, g1, today0) : {};
     const sums = {};
     for (const r of DB.q('SELECT date, SUM(income) AS i, SUM(expense) AS e FROM entry WHERE ledger_id=? AND date BETWEEN ? AND ? GROUP BY date', [lid, g0, g1])) sums[r.date] = r;
     const today = U.today();
@@ -39,6 +42,7 @@ Pages.calendar = (() => {
         html += `<td class="${cls}" data-d="${d}"><span class="dn">${Number(d.slice(8))}</span>${showLu ? `<span class="lu">${lu.m}.${lu.d}</span>` : ''}
           ${an.slice(0, 1).map(a => `<div class="an${a[1] ? ' h' : ''}">${U.esc(a[0])}</div>`).join('')}
           ${(sch[d] || []).slice(0, 2).map(x => `<div class="sc" style="${x.bg ? `background:${U.esc(x.bg)}` : ''}">${U.esc(x.text)}</div>`).join('')}
+          ${(mev[d] || []).slice(0, 2).map(ev => `<div class="mv${ev.sign === 'in' ? ' in' : ''}${ev.done ? ' done' : ''}">${ev.kind === 'card' ? '💳' : '🔁'}${short(ev.amount)}</div>`).join('')}
           ${sm && sm.i ? `<div class="mi">+${short(sm.i)}</div>` : ''}${sm && sm.e ? `<div class="mo">-${short(sm.e)}</div>` : ''}${!other && ns.has(d) ? '<div class="nsp">무지출</div>' : ''}</td>`;
       });
       html += '</tr>';
@@ -48,6 +52,9 @@ Pages.calendar = (() => {
     const [mi, me] = L.totals(lid, U.iso(s.y, s.m, 1), U.iso(s.y, s.m, U.monthEnd(s.y, s.m)));
     const streak = m0 <= today && today <= m1 ? Ins.noSpendStreak(lid, today) : 0;
     c.appendChild(UI.el(`<div class="small muted" style="margin-top:6px">이달 수입 <span class="in">${UI.money(mi)}</span> · 지출 <span class="out">${UI.money(me)}</span>${ns.size ? ` · <span class="nsp-t">무지출 ${ns.size}일${streak >= 2 ? ` (오늘까지 ${streak}일째)` : ''}</span>` : ''} — 날짜를 누르면 그날 일정·내역을 봅니다</div>`));
+    const mt = UI.el(`<label class="check small" style="margin-top:4px"><input type="checkbox" data-mon${moneyOn ? ' checked' : ''}> 💳 카드 결제일 · 🔁 고정 수입·지출도 달력에 보이기</label>`);
+    UI.$('[data-mon]', mt).onchange = e => { App.setPref('cal_money', e.target.checked ? null : 'false'); App.render(true); };
+    c.appendChild(mt);
     UI.on(c, 'td[data-d]', 'click', (e, td) => { s.sel = td.dataset.d; daySheet(td.dataset.d); UI.$$('td.sel', c).forEach(x => x.classList.remove('sel')); td.classList.add('sel'); });
     App.fab(() => scheduleSheet(null, s.sel || today), '일정 추가');
   }
@@ -60,11 +67,15 @@ Pages.calendar = (() => {
     const rows = Ord.applyDayOrder(DB.q('SELECT * FROM entry WHERE ledger_id=? AND date=? ORDER BY id', [lid, d]), Ord.dayOrders(lid));
     const cmap = L.categoryMap(lid);
     const inc = U.sum(rows.map(r => r.income)), exp = U.sum(rows.map(r => r.expense));
+    const evs = App.pref('cal_money') !== 'false' ? (MCal.events(lid, d, d, U.today())[d] || []) : [];
+    const evHtml = evs.length ? `<div class="section-t">결제일 · 고정 수입·지출</div><ul class="list mlist">${evs.map(ev => `<li class="${ev.done ? 'done' : ''}"><span>${ev.kind === 'card' ? '💳' : '🔁'}</span><div class="grow">${U.esc(ev.label)}${ev.done ? ` <span class="tiny muted">(${ev.kind === 'card' ? '결제함' : '처리함'} ✓)</span>` : ''}</div>
+      <b class="${ev.sign === 'in' ? 'in' : 'out'} nowrap">${ev.sign === 'in' ? '+' : '-'}${UI.money(ev.amount)}</b></li>`).join('')}</ul>` : '';
     const body = UI.el(`<div>
       <div class="muted small">${U.esc(lu)}</div>
       ${an.length ? `<div style="margin:6px 0">${an.map(a => `<span class="chip" style="${a[1] ? 'color:var(--out)' : ''}">${U.esc(a[0])}</span>`).join(' ')}</div>` : ''}
       <div class="section-t">일정</div>
       ${sch.length ? `<ul class="list">${sch.map(x => `<li class="tap" data-s="${x.id}"><span class="chip" style="${x.bg ? `background:${U.esc(x.bg)}` : ''}">&nbsp;</span><div class="grow">${U.esc(x.text)}${x.remind_days ? ` <span class="tiny muted">(${x.remind_days}일 전 알림)</span>` : ''}${x.group_id ? ' <span class="tiny muted">반복</span>' : ''}</div></li>`).join('')}</ul>` : '<div class="muted small">일정이 없어요</div>'}
+      ${evHtml}
       <div class="section-t">내역 ${rows.length ? `<span class="small"><span class="in">+${UI.money(inc)}</span> <span class="out">-${UI.money(exp)}</span></span>` : ''}</div>
       ${rows.length ? `<ul class="list">${rows.map(r => Entry.rowHtml(r, null, false, cmap)).join('')}</ul>` : '<div class="muted small">내역이 없어요</div>'}
     </div>`);

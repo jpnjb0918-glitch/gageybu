@@ -3,6 +3,20 @@
 const SMS_SAMPLE = "[Web발신]\n신한카드(1234)승인 홍*동 12,500원(일시불)10/19 12:34 스타벅스 누적1,234,567원\n[Web발신]\nKB국민카드1234승인\n홍*동님\n45,000원 일시불\n10/18 19:02\n교촌치킨\n누적1,279,567원\n[Web발신]\n삼성1234승인 홍*동\n120,000원 03개월\n10/17 15:20 이마트 성수점\n누적1,399,567원\n[Web발신]\n현대카드 M 승인\n홍*동\n8,900원 일시불\n10/16 08:10\nGS25 역삼점\n누적1,408,467원\n[Web발신]\n롯데카드 2*7*승인취소 홍*동 12,500원 일시불 10/19 13:00 스타벅스\n[Web발신]\n[KB]10/15 09:00\n123-***-456\n홍길동\n입금\n3,200,000\n잔액5,000,000\n[Web발신]\n우리(1234)승인\n홍*동님\n6,000원 일시불\n10/14 21:45\n쿠팡이츠\n누적123,000원\n[Web발신]\n하나(1*2*)승인 홍*동님 23,400원 일시불 10/13 18:30 올리브영 누적1,234,567원\n[Web발신]\nNH농협카드(1234)승인 홍*동 4,500원 일시불 01/03 07:55 메가커피 총누적1,234,567원\n[카카오뱅크] 홍*동(1234) 10/12 11:20 출금 15,000원 배달의민족 잔액 123,456원\n";
 const GUESS_ITEMS = [['스타벅스 강남점', false], ['메가박스 코엑스', false], ['쿠팡이츠', false], ['쿠팡', false], ['GS25 역삼점', false], ['이마트 성수점', false], ['KTX 서울', false], ['SKT 요금', false], ['넷플릭스', false], ['기차표', false], ['아무가게', false], ['홍길동', true], ['한전', false]];
 const CALC_SAMPLES = ["12000+3500", "45,000/3", "(1200+800)*2", "1,000", "", "-500", "10000-2500*2", "7/2", "5/2", "-5/2", "3×4", "12÷5", "1e3", "2*(3", "10/0", "1.5*3", "0.1*3"];
+const SPLIT_SAMPLES = [[{ date: '2026-01-31', item: '자동차보험', expense: 1000003, code: '60', memo: '1년치', pay: 'card' }, 12],
+  [{ date: '2026-03-15', item: '상여', income: 500000, code: '00' }, 3],
+  [{ date: '2026-03-15', item: 'x', expense: 5, code: '30' }, 12],
+  [{ date: '2026-03-15', item: 'x', expense: 500, income: 5, code: '30' }, 2],
+  [{ date: '2026-03-15', item: 'x', expense: 500, code: '30' }, 1],
+  [{ date: '2026-12-31', item: '연회비', expense: 120000, code: '80' }, 61]];
+const FX_SAMPLES = [['12.5', 'USD', '1,380.5'], ['3,500', 'JPY', '935.2'], ['100000', 'VND', '5.4'], ['0.99', 'EUR', '1500.55'],
+  ['1', 'USD', '0.5'], ['1', 'USD', '1.49999'], ['abc', 'USD', '1300'], ['10', 'XXX', '1300'], ['10', 'USD', '0'],
+  ['999999999.99', 'GBP', '1777.7777'], ['12.50', 'THB', '38.40'], ['', 'USD', '1300']];
+const EMO_NAMES = ['급여', '기타 수입', '공과금', '수도세', '전기세', '가스비', '교육비', '학원비', '교재비', '식비', '식료품', '외식', '교통·통신비',
+  '대중교통', '휴대폰 요금', '인터넷', '생활용품', '생필품', '보험', '보험료', '저축', '적금', '기타지출', '잡비', '미술',
+  '계약금', '여행', '넷플릭스', '아기 기저귀', '술', '술값', 'TV 수신료', '반려동물', ''];
+const GUESS_PAY = [['신한카드', 'out'], ['KB국민카드', 'out'], ['현대카드', 'out'], ['삼성', 'out'], ['카카오뱅크', 'out'], ['', 'out'],
+  ['네이버페이', 'out'], ['하나', 'in'], ['롯데카드', 'cancel'], ['신한체크', 'out']];
 window.__compat = {
   build() {
     const lid = L.firstLedgerId();
@@ -122,6 +136,46 @@ window.__compat = {
     DB.setMeta('settle_day', 25);
     DB.setMeta('password', Bk.hashPassword('1111'));
     DB.setJson('address_labels', { tel1: '집전화' });
+    // 1.8.0: 결제수단·나눠 적기·외화 환율·매주/매년·주간/전체 예산·카테고리 그림·휴지통
+    const c3 = A.saveCard({ company: '신한', name: 'Deep Dream', pay_day: 14, 'x.perf': 300000 });
+    A.saveCard({ 'x.perf': 200000 }, c1);
+    const add2 = (d, item, exp, code, pay, inc) => L.addEntry(lid, { date: d, item, income: inc || 0, expense: exp || 0, code: code || '31', pay: pay || '' });
+    add2('2026-10-02', '스타벅스', 4800, '31', `card:${c3}`);
+    add2('2026-10-09', '스타벅스', 5200, '31', `card:${c3}`);
+    add2('2026-08-30', '스타벅스', 4500, '31', 'cash');
+    add2('2026-07-10', '스타벅스', 4100, '31', 'cash');
+    add2('2026-10-09', '스타벅스 (취소)', -5200, '31', `card:${c3}`);
+    add2('2026-10-07', '편의점', 3000, '30', 'pay');
+    add2('2026-10-08', '시장', 12000, '30', 'etc:지역화폐');
+    add2('2026-10-06', '버스', 1500, '40', `card:${c1}`);
+    add2('2026-09-06', '버스', 1500, '40', `card:${c1}`);
+    add2('2026-10-06', '용돈 받음', 0, '01', 'bank', 20000);
+    Pay.setCustom(['지역화폐', '상품권', '지역화폐', ' ', '현금']);
+    add2('2026-10-09', '꽃집', 8000, '30', 'etc:상품권');
+    Pay.renameCustom('상품권', '온누리상품권');
+    Split.add(lid, { date: '2026-01-31', item: '자동차보험', expense: 1200005, code: '60', pay: `card:${c3}`, memo: '1년치' }, 12);
+    Fx.setRate('USD', '1,380.5');
+    Fx.setRate('JPY', '935.2');
+    R.saveRule(lid, { item: '용돈', expense: 30000, code: '80', start: '2026-09-01', cycle: 'W', wday: 4, every: 2, pay: 'cash' });
+    R.saveRule(lid, { item: '자동차세', expense: 200000, code: '60', start: '2025-01-01', cycle: 'Y', ymonth: 6, day: 30, end: '2030-12-31' });
+    const wr = R.saveRule(lid, { item: '주간 회비', income: 10000, code: '01', start: '2026-10-01', cycle: 'W', wday: 0, end: '2026-11-30' });
+    R.saveRule(lid, { item: '연말 정산', income: 300000, code: '01', start: '2026-01-01', cycle: 'Y', ymonth: 2, day: 31 });
+    const [due2] = R.pending(lid, '2026-10-12');
+    R.apply(lid, due2.filter(x => x.rule.id === wr).slice(0, 1));
+    Week.setBudget(lid, 150000);
+    TBud.set(lid, ['2026-10', '2026-11'], 1400000);
+    TBud.set(lid, ['2026-11'], 0);
+    Emo.set(lid, '31', '🍜');
+    Emo.fillDefaults(lid);
+    Emo.set(lid, '30', '');
+    Emo.set(lid, '9', '🎬🎬🎬🎬🎬');
+    const tE = DB.val("SELECT id FROM entry WHERE item='숙소'");
+    L.deleteEntries([tE, DB.val("SELECT id FROM entry WHERE item='편의점' AND pay='pay'")]);
+    Trash.restore(Trash.items(lid).filter(x => x.entry.item === '숙소').map(x => x.id));
+    L.deleteEntries([DB.val("SELECT id FROM entry WHERE item='시장'")]);
+    L.setCategory(lid, '33', '지울것');
+    add2('2026-10-01', '지울 내역', 1000, '33');
+    L.deleteCategory(lid, '33');
   },
 
   dump() {
@@ -172,6 +226,33 @@ window.__compat = {
         res[`${k}.codespent.${sd}`] = ['30', '31', '40'].flatMap(c => ['2026-10-01', '2026-10-24', '2026-10-25'].map(d => Ins.codeSpent(lid, c, d, sd)));
         res[`${k}.alert.${sd}`] = ['30', '31'].flatMap(c => [0, 100000, 130000, 330000, 400000].map(b => Ins.budgetAlert(lid, c, '2026-10-16', b, sd)));
       }
+      res[k + '.pay_sum'] = Pay.summary(lid, '2026-10-01', '2026-10-31');
+      res[k + '.pay_sum_all'] = Pay.summary(lid, '2020-01-01', '2030-12-31');
+      res[k + '.pay_ent'] = Pay.entries(lid, 'cash', '2026-01-01', '2026-12-31').map(r => r.id);
+      res[k + '.search_pay'] = L.search(lid, { pays: ['pay', 'cash', 'etc:지역화폐'] }).map(r => r.id);
+      for (const it of ['스타벅스', '버스', '', '없는가게']) {
+        const sp = Same.place(lid, it, TODAY);
+        res[`${k}.same.${it}`] = sp === null ? null : Object.assign({}, sp, { rows: sp.rows.map(r => r.id) });
+      }
+      res[k + '.week'] = ['2026-10-16', '2026-10-05', '2026-10-26'].map(d => Week.progress(lid, d, TODAY));
+      res[k + '.weeks'] = [1, 25].map(sd => Week.ofMonth(lid, 2026, 10, sd));
+      res[k + '.sav'] = [1, 25].map(sd => Sav.trend(lid, 2026, sd));
+      res[k + '.fixed'] = [9, 10, 11].flatMap(m => [1, 25].map(sd => Fixed.summary(lid, 2026, m, sd, TODAY)));
+      res[k + '.tbud'] = ['2026-10', '2026-11'].map(ym => TBud.get(lid, ym));
+      res[k + '.talert'] = [0, 1500000, 1700000, 2500000].flatMap(b => [1, 25].map(sd => TBud.alert(lid, '2026-10-16', b, sd)));
+      res[k + '.mspent'] = [1, 25].map(sd => TBud.monthSpent(lid, '2026-10-16', sd));
+      res[k + '.mcal'] = MCal.events(lid, '2026-09-25', '2026-11-05', TODAY);
+      const sid = DB.val("SELECT MIN(id) FROM entry WHERE ledger_id=? AND origin LIKE 'split:%'", [lid]);
+      res[k + '.split_grp'] = sid ? Split.group(sid) : [];
+      res[k + '.split_one'] = Split.group(DB.val('SELECT MIN(id) FROM entry WHERE ledger_id=?', [lid]) || 0);
+      res[k + '.trash'] = Trash.items(lid);
+      res[k + '.trash_n'] = Trash.count(lid);
+      res[k + '.emoji'] = Emo.map(lid);
+      const emap = Emo.map(lid);
+      res[k + '.deco'] = L.categories(lid).map(c => Emo.deco(emap, c.code, c.name)).concat([Emo.deco(emap, 'zz', '없음')]);
+      res[k + '.ruletext'] = R.rules(lid).map(r => R.ruleText(r));
+      res[k + '.occ'] = R.rules(lid).map(r => R.occurrences(r, '2025-06-01', '2027-07-01'));
+      res[k + '.status'] = R.rules(lid).map(r => R.occurrences(r, '2026-09-01', '2026-11-30').map(d => R.statusOf(r, d, TODAY)));
       res[k + '.nospend'] = Ins.noSpendDays(lid, '2026-09-25', '2026-10-16');
       res[k + '.streak'] = ['2026-10-16', '2026-10-11', '2026-10-09'].map(d => Ins.noSpendStreak(lid, d));
     }
@@ -190,7 +271,7 @@ window.__compat = {
     for (const k2 of Object.keys(cnt)) res['att.counts'][String(k2)] = cnt[k2];
     res['att.list'] = Object.keys(cnt).map(Number).sort((a, b) => a - b).map(e => Att.listFor(e));
     res.sms = Sms.parse(SMS_SAMPLE, '2026-10-20');
-    res['sms.entries'] = res.sms.map(Sms.toEntry);
+    res['sms.entries'] = res.sms.map(p => Sms.toEntry(p));
     res['sms.jan'] = Sms.parse('[Web발신]\n신한카드(1234)승인 홍*동 9,900원(일시불)12/30 23:59 넷플릭스', '2027-01-02');
     const lid1 = L.firstLedgerId();
     res.guess = GUESS_ITEMS.map(([it, inc]) => Sms.guessCode(lid1, it, inc));
@@ -220,6 +301,21 @@ window.__compat = {
     const l2 = [];
     for (const y of [2020, 2026, 2033]) for (const m of [1, 4, 8, 12]) for (const dd of [1, 15, 29, 30]) l2.push(Lunar.lunarToSolar(y, m, dd, false));
     res.lunar2 = l2;
+    res.pay_opts = Pay.options();
+    try { Pay.renameCustom('지역화폐', '온누리상품권'); res.rename_err = ''; } catch (e) { res.rename_err = e.message; }
+    res.pay_custom = Pay.custom();
+    res.guess_pay = GUESS_PAY.map(([t, kd]) => Pay.guess(t, kd));
+    res['sms.entries.pay'] = res.sms.map(p => Sms.toEntry(p, true));
+    const err = f => { try { return f(); } catch (e) { return 'ERR:' + e.message; } };
+    res.split_plan = SPLIT_SAMPLES.map(([e, n]) => err(() => Split.plan(e, n)));
+    res.fx = FX_SAMPLES.map(([a, c, r]) => err(() => Fx.convert(a, c, r)));
+    res.fx_rates = Fx.rates();
+    res.card_perf = [9, 10].map(m => Perf.cards(2026, m));
+    res.emo_suggest = EMO_NAMES.map(n => Emo.suggest(n));
+    res.week_bounds = ['2026-10-12', '2026-10-18', '2026-10-19', '2027-01-01'].map(d => Week.bounds(d));
+    res.saving_codes = Sav.codes(L.firstLedgerId());
+    res.trash_all = Trash.count();
+    res.trash_left = ['2026-10-01', '2026-10-30', '2026-10-31', '2026-11-05'].map(d => Trash.daysLeft('2026-10-01 10:00:00', d));
     res.meta = {};
     for (const r of DB.q("SELECT * FROM meta WHERE key<>'password'")) res.meta[r.key] = r.value;
     res.pw = [Bk.checkPassword('1111', DB.getMeta('password')), Bk.checkPassword('1112', DB.getMeta('password'))];

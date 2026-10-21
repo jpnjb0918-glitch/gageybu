@@ -12,7 +12,8 @@ from .. import theme as T
 from ..lunar import lunar_label
 from ..services import calendar_svc as C
 from ..services import insights as INS
-from ..util import month_end
+from ..services import money as M
+from ..util import fmt_money, month_end
 from .widgets import (CENTER, DateEdit, MonthNav, button, cell, confirm, error, export_csv, fill, h, info, make_table)
 
 SUN = '#d0312d'
@@ -107,7 +108,7 @@ class AnniversaryDialog(QDialog):
 
 
 class CalendarPage(QWidget):
-    title = '일정관리'
+    title = '달력'
 
     def __init__(self, app):
         super().__init__()
@@ -132,6 +133,8 @@ class CalendarPage(QWidget):
         self.day_lbl.setObjectName('DayLabel')
         self.ann_lbl = QLabel()
         self.ann_lbl.setWordWrap(True)
+        self.money_lbl = QLabel()                  # 그 날의 카드 결제·고정 수입·지출 (1.8.0)
+        self.money_lbl.setWordWrap(True)
         self.items = QListWidget()
         self.items.currentRowChanged.connect(self._item_sel)
         self.text = QPlainTextEdit()
@@ -172,6 +175,7 @@ class CalendarPage(QWidget):
         bf = QFormLayout(box)
         bf.addRow(self.day_lbl)
         bf.addRow(self.ann_lbl)
+        bf.addRow(self.money_lbl)
         bf.addRow(self.items)
         bf.addRow(self.text)
         bf.addRow('시작할 때 알려주기', self.remind)
@@ -187,12 +191,16 @@ class CalendarPage(QWidget):
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
         self.ns_chk = QCheckBox('무지출 날 표시')
-        self.ns_chk.setToolTip('지금 장부에서 지출이 없었던 날(오늘까지)에 표시 — 무지출 챌린지')
+        self.ns_chk.setToolTip('지금 가계부에서 지출이 없었던 날(오늘까지)에 표시 — 무지출 챌린지')
         self.ns_chk.setChecked(str(T.settings().value('cal_no_spend', '1')) not in ('0', 'false'))
         self.ns_chk.toggled.connect(self._ns_toggled)
+        self.money_chk = QCheckBox('결제일·고정')
+        self.money_chk.setToolTip('카드 대금 결제일(결제할 금액)과 고정 수입·지출 날짜를 달력에 미리 표시')
+        self.money_chk.setChecked(str(T.settings().value('cal_money', '1')) not in ('0', 'false'))
+        self.money_chk.toggled.connect(self._money_toggled)
         self.ns_lbl = QLabel()
-        ll.addWidget(h(self.nav, self.ns_lbl, 'stretch', self.ns_chk, button('오늘', self.today), button('기념일 관리', self.anniv),
-                       button('이달 일정 CSV', self.export)))
+        ll.addWidget(h(self.nav, self.ns_lbl, 'stretch', self.money_chk, self.ns_chk, button('오늘', self.today),
+                       button('기념일 관리', self.anniv), button('이달 일정 CSV', self.export)))
         ll.addWidget(self.grid, 1)
         sp = QSplitter()
         sp.addWidget(left)
@@ -220,6 +228,7 @@ class CalendarPage(QWidget):
                 streak = INS.no_spend_streak(self.con, lid, today) if me == today else 0
                 self.ns_lbl.setText(f"<span style='color:{tn['ann']}'>무지출 {len(no_spend)}일"
                                     + (f' · 오늘까지 {streak}일째' if streak >= 2 else '') + '</span>')
+        self.money = M.money_events(self.con, self.app.lid, start, end, today) if self.money_chk.isChecked() else {}
         for c, key in ((0, 'sun'), (6, 'sat')):
             self.grid.horizontalHeaderItem(c).setForeground(QColor(tn[key]))
         for w, week in enumerate(weeks):
@@ -234,6 +243,8 @@ class CalendarPage(QWidget):
                     parts.append(f'<span style="color:{tn["ann"]};font-size:8pt;font-weight:bold">● 무지출</span>')
                 for title, holi in anns.get(d, []):
                     parts.append(f'<span style="color:{tn["sun"] if holi else tn["ann"]};font-size:9pt">{html.escape(title)}</span>')
+                for ev in self.money.get(d.isoformat(), []):
+                    parts.append(_money_html(ev, tn, short=True))
                 for s in scheds.get(d.isoformat(), []):
                     fg = s['fg'] or ('#333' if s['bg'] else tn['text2'])     # 배경색을 고른 일정은 진한 글자
                     bg = s['bg']
@@ -256,6 +267,10 @@ class CalendarPage(QWidget):
 
     def _ns_toggled(self, on):
         T.set_pref('cal_no_spend', '1' if on else '0')
+        self.refresh()
+
+    def _money_toggled(self, on):
+        T.set_pref('cal_money', '1' if on else '0')
         self.refresh()
 
     def show_date(self, d):
@@ -282,6 +297,9 @@ class CalendarPage(QWidget):
         self.day_lbl.setText(f"{d:%Y-%m-%d} ({'월화수목금토일'[d.weekday()]})  {lunar_label(d)}")
         anns = C.anniversaries_between(self.con, d, d).get(d, [])
         self.ann_lbl.setText(', '.join(t + (' (휴일)' if hh else '') for t, hh in anns))
+        evs = getattr(self, 'money', {}).get(d.isoformat(), [])
+        self.money_lbl.setText('<br>'.join(_money_html(ev, T.tone()) for ev in evs))
+        self.money_lbl.setVisible(bool(evs))
         self.items.clear()
         for s in C.schedules(self.con, d, d).get(d.isoformat(), []):
             it = QListWidgetItem(s['text'] + (f"   [알림 {s['remind_days']}일 전]" if s['remind_days'] else ''))
@@ -389,3 +407,13 @@ class CalendarPage(QWidget):
             d += dt.timedelta(days=1)
         fill(t, rows)
         export_csv(self, t, f'일정_{y}-{m:02d}')
+
+
+def _money_html(ev, tn, short=False):
+    """달력 칸·그 날 안내의 돈 일정 한 줄: 💳 카드 결제 · 🔁 고정 수입·지출 (이미 결제했거나 넣은 것은 흐리게 ✓)"""
+    icon = '💳' if ev['kind'] == 'card' else '🔁'
+    col = tn['faint'] if ev['done'] else (tn['in'] if ev['sign'] == 'in' else tn['out'])
+    amt = ('+' if ev['sign'] == 'in' else '') + fmt_money(ev['amount'])
+    label = ev['label'] if not short or len(ev['label']) <= 10 else ev['label'][:9] + '…'
+    return (f'<span style="color:{col};font-size:{8 if short else 10}pt">{icon} {html.escape(label)} {amt}'
+            + (' ✓' if ev['done'] else '') + '</span>')

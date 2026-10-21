@@ -94,18 +94,21 @@ const L = (() => {
         DB.run('INSERT INTO cat_group SELECT ?, code, name FROM cat_group WHERE ledger_id=?', [lid, copyFrom]);
         DB.run('INSERT INTO category SELECT ?, code, name, sort FROM category WHERE ledger_id=?', [lid, copyFrom]);
         if (!codesOnly) {
-          DB.run('INSERT INTO entry(ledger_id,date,item,income,expense,code,memo,origin) ' +
-            'SELECT ?,date,item,income,expense,code,memo,origin FROM entry WHERE ledger_id=? ORDER BY date,id', [lid, copyFrom]);
+          DB.run('INSERT INTO entry(ledger_id,date,item,income,expense,code,memo,origin,pay) ' +
+            'SELECT ?,date,item,income,expense,code,memo,origin,pay FROM entry WHERE ledger_id=? ORDER BY date,id', [lid, copyFrom]);
           DB.run('INSERT INTO budget SELECT ?, ym, code, amount FROM budget WHERE ledger_id=?', [lid, copyFrom]);
           DB.run('INSERT INTO item_word SELECT ?, name, count FROM item_word WHERE ledger_id=?', [lid, copyFrom]);
-          DB.run('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort) SELECT ?,item,income,expense,code,memo,sort FROM favorite WHERE ledger_id=?', [lid, copyFrom]);
+          DB.run('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort,pay) SELECT ?,item,income,expense,code,memo,sort,pay FROM favorite WHERE ledger_id=?', [lid, copyFrom]);
           for (const r of DB.q('SELECT * FROM recurring WHERE ledger_id=?', [copyFrom])) {
             const thr = R.processedThrough(r.id);
-            DB.run('INSERT INTO recurring(ledger_id,item,income,expense,code,day,start,end,memo,created,applied_through) ' +
-              'VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-              [lid, r.item, r.income, r.expense, r.code, r.day, r.start, r.end, r.memo, r.created, thr || null]);
+            DB.run('INSERT INTO recurring(ledger_id,item,income,expense,code,day,start,end,memo,created,applied_through,pay,cycle,every,wday,ymonth,end2) ' +
+              'VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+              [lid, r.item, r.income, r.expense, r.code, r.day, r.start, r.end, r.memo, r.created, thr || null,
+                r.pay, r.cycle, r.every, r.wday, r.ymonth, r.end2]);
           }
         }
+        const emo = DB.getMeta(`cat_emoji:${copyFrom}`);          // 카테고리 그림 (1.8.0)
+        if (emo) DB.setMeta(`cat_emoji:${lid}`, emo);
       } else {
         DB.run("INSERT INTO cat_group VALUES(?, '0', '수입')", [lid]);
       }
@@ -128,7 +131,7 @@ const L = (() => {
   const renameLedger = (lid, name) => DB.run('UPDATE ledger SET name=? WHERE id=?', [name, lid]);
   function firstLedgerId() { const r = DB.one('SELECT id FROM ledger ORDER BY sort, id LIMIT 1'); return r ? r.id : null; }
   function deleteLedger(lid) {
-    if (lid === firstLedgerId()) throw new Error('첫 번째 장부는 삭제할 수 없습니다 (이름 변경은 가능).');
+    if (lid === firstLedgerId()) throw new Error('첫 번째 가계부는 삭제할 수 없습니다 (이름은 바꿀 수 있습니다).');
     DB.run('DELETE FROM ledger WHERE id=?', [lid]);
   }
   /** 장부 데이터 초기화: 내역·예산·예약 삭제, 계정과목은 유지 */
@@ -165,10 +168,22 @@ const L = (() => {
     if (!name) return;
     DB.run('INSERT OR REPLACE INTO cat_group VALUES(?,?,?)', [lid, code, name]);
   }
+  /** 카테고리(대분류) 삭제. 안의 세부 카테고리가 아무 데도 안 쓰였으면 함께 지움 (PC판 delete_group 과 같음) */
   function deleteGroup(lid, code) {
-    if (code === '0') throw new Error('0번(수입) 대분류는 삭제할 수 없습니다.');
-    if (categories(lid, code).length) throw new Error('소분류가 남아 있으면 대분류를 삭제할 수 없습니다.');
-    DB.run('DELETE FROM cat_group WHERE ledger_id=? AND code=?', [lid, code]);
+    if (code === '0') throw new Error('수입 카테고리(0번)는 삭제할 수 없습니다.');
+    const cats = categories(lid, code);
+    const used = cats.filter(c => Object.values(categoryUsage(lid, c.code)).some(Boolean));
+    if (used.length) {
+      const names = used.slice(0, 3).map(c => c.name).join(', ') + (used.length > 3 ? ' 등' : '');
+      throw new Error(`내역이 있는 세부 카테고리(${names})가 있어 삭제할 수 없습니다.\n그 세부 카테고리를 먼저 다른 카테고리로 옮기거나 지우세요.`);
+    }
+    DB.tx(() => {
+      for (const c of cats) {
+        DB.run('DELETE FROM category WHERE ledger_id=? AND code=?', [lid, c.code]);
+        DB.run("UPDATE favorite SET code='' WHERE ledger_id=? AND code=?", [lid, c.code]);
+      }
+      DB.run('DELETE FROM cat_group WHERE ledger_id=? AND code=?', [lid, code]);
+    });
   }
   function setCategory(lid, code, name) {
     if (!name) return;
@@ -190,10 +205,11 @@ const L = (() => {
   /** src 계정으로 입력된 모든 내역·예약·예산을 dst 로 옮기고 src 삭제 */
   function mergeCategory(lid, src, dst) {
     if (src === dst) return;
-    if (!DB.one('SELECT 1 AS x FROM category WHERE ledger_id=? AND code=?', [lid, dst])) throw new Error(`계정코드 ${dst} 가 없습니다.`);
+    if (!DB.one('SELECT 1 AS x FROM category WHERE ledger_id=? AND code=?', [lid, dst])) throw new Error(`카테고리 번호 ${dst} 가 없습니다.`);
     DB.tx(() => {
       DB.run('UPDATE entry SET code=? WHERE ledger_id=? AND code=?', [dst, lid, src]);
       DB.run('UPDATE recurring SET code=? WHERE ledger_id=? AND code=?', [dst, lid, src]);
+      DB.run('UPDATE favorite SET code=? WHERE ledger_id=? AND code=?', [dst, lid, src]);
       for (const r of DB.q('SELECT ym, amount FROM budget WHERE ledger_id=? AND code=?', [lid, src])) {
         if (!DB.run('UPDATE budget SET amount=amount+? WHERE ledger_id=? AND ym=? AND code=?', [r.amount, lid, r.ym, dst]).changes) {
           DB.run('INSERT INTO budget VALUES(?,?,?,?)', [lid, r.ym, dst, r.amount]);
@@ -207,31 +223,44 @@ const L = (() => {
     const n = t => DB.val(`SELECT COUNT(*) AS v FROM ${t} WHERE ledger_id=? AND code=?`, [lid, code]);
     return { entry: n('entry'), recurring: n('recurring'), budget: n('budget') };
   }
-  /** 원본과 같이 그 계정의 내역·예약·예산도 함께 삭제 */
+  /** 원본과 같이 그 세부 카테고리의 내역·고정 수입·지출·예산도 함께 삭제 (자주 쓰는 내역은 카테고리만 비움). 지운 내역은 휴지통으로 */
   function deleteCategory(lid, code) {
-    DB.tx(() => { for (const t of ['entry', 'recurring', 'budget', 'category']) DB.run(`DELETE FROM ${t} WHERE ledger_id=? AND code=?`, [lid, code]); });
+    DB.tx(() => {
+      Trash.put(DB.q('SELECT id FROM entry WHERE ledger_id=? AND code=?', [lid, code]).map(r => r.id), 'category');
+      for (const t of ['entry', 'recurring', 'budget', 'category']) DB.run(`DELETE FROM ${t} WHERE ledger_id=? AND code=?`, [lid, code]);
+      DB.run("UPDATE favorite SET code='' WHERE ledger_id=? AND code=?", [lid, code]);
+    });
   }
 
   // ── 내역 ──
   const norm = e => [e.date, (e.item || '').trim(), parseInt(e.income || 0, 10), parseInt(e.expense || 0, 10),
     (e.code || '').trim(), (e.memo || '').trim()];
 
+  /** e: date·item·income·expense·code·memo·pay(결제수단, 1.8.0) */
   function addEntry(lid, e, origin) {
     const [d, item, inc, exp, code, memo] = norm(e);
     return DB.tx(() => {
-      const eid = DB.run('INSERT INTO entry(ledger_id,date,item,income,expense,code,memo,origin) VALUES(?,?,?,?,?,?,?,?)',
-        [lid, d, item, inc, exp, code, memo, origin || null]).lastId;
+      const eid = DB.run('INSERT INTO entry(ledger_id,date,item,income,expense,code,memo,origin,pay) VALUES(?,?,?,?,?,?,?,?,?)',
+        [lid, d, item, inc, exp, code, memo, origin || null, (e.pay || '').trim()]).lastId;
       if (item && !DB.run('UPDATE item_word SET count=count+1 WHERE ledger_id=? AND name=?', [lid, item]).changes) {
         DB.run('INSERT INTO item_word VALUES(?,?,1)', [lid, item]);
       }
       return eid;
     });
   }
+  /** pay 가 없으면 결제수단은 그대로 */
   function updateEntry(eid, e) {
     const [d, item, inc, exp, code, memo] = norm(e);
-    DB.run('UPDATE entry SET date=?,item=?,income=?,expense=?,code=?,memo=? WHERE id=?', [d, item, inc, exp, code, memo, eid]);
+    DB.tx(() => {
+      DB.run('UPDATE entry SET date=?,item=?,income=?,expense=?,code=?,memo=? WHERE id=?', [d, item, inc, exp, code, memo, eid]);
+      if ('pay' in e) DB.run('UPDATE entry SET pay=? WHERE id=?', [(e.pay || '').trim(), eid]);
+    });
   }
-  const deleteEntries = ids => DB.tx(() => ids.forEach(i => DB.run('DELETE FROM entry WHERE id=?', [i])));
+  /** 내역 지우기. 지운 내역은 휴지통에 30일 보관 (1.8.0, trash=false 면 바로 지움) */
+  const deleteEntries = (ids, trash) => DB.tx(() => {
+    if (trash !== false) Trash.put(ids, 'delete');
+    ids.forEach(i => DB.run('DELETE FROM entry WHERE id=?', [i]));
+  });
   const getEntry = eid => DB.one('SELECT * FROM entry WHERE id=?', [eid]);
   const balanceBefore = (lid, date) => DB.val('SELECT COALESCE(SUM(income-expense),0) AS v FROM entry WHERE ledger_id=? AND date<?', [lid, date]);
 
@@ -270,6 +299,7 @@ const L = (() => {
       a.push(t, t);
     }
     if (o.codes && o.codes.length) { sql += ` AND code IN (${o.codes.map(() => '?').join(',')})`; a.push(...o.codes); }
+    if (o.pays && o.pays.length) { sql += ` AND pay IN (${o.pays.map(() => '?').join(',')})`; a.push(...o.pays); }
     if (o.amount !== undefined && o.amount !== null) {
       const op = AMOUNT_OPS[o.amountOp || '같은 금액'];
       const side = o.amountSide || '수입+지출';
@@ -302,31 +332,74 @@ const L = (() => {
     currentBalance, AMOUNT_OPS, search, itemWords, deleteItemWord, lastCodeForItem, codeLabel, signedAmount };
 })();
 
-// ════════════════ 예약 (services/recurring.py) ════════════════
+// ════════════════ 고정 수입·지출 (services/recurring.py) ════════════════
+// 1.8.0: 매주·매년도. 매주·매년 규칙은 end 칸에 BLOCK_END 를 넣어 예전 판(매달만 아는 판)이 건너뛰게 하고 진짜 종료일은 end2 에
 const R = (() => {
+  const BLOCK_END = '1900-01-01';
+  const CYCLES = [['M', '매달'], ['W', '매주'], ['Y', '매년']];
   const rules = lid => DB.q('SELECT * FROM recurring WHERE ledger_id=? ORDER BY day, id', [lid]);
+  const get = (r, k, d) => (r[k] === undefined || r[k] === null ? d : r[k]);
+  const cycleOf = r => (['M', 'W', 'Y'].includes(get(r, 'cycle', 'M')) ? get(r, 'cycle', 'M') : 'M');
+  /** 진짜 종료일 (없으면 null) — 매주·매년은 end2 */
+  const endOf = r => (cycleOf(r) !== 'M' ? get(r, 'end2', null) : get(r, 'end', null));
+  /** '매달 25일' · '매주 월요일' · '2주마다 금요일' · '매년 3월 15일' (31일은 '말일') */
+  function ruleText(r) {
+    const c = cycleOf(r);
+    if (c === 'W') {
+      const n = Math.max(1, parseInt(get(r, 'every', 1), 10));
+      return `${n === 1 ? '매주' : `${n}주마다`} ${U.WEEKDAYS[parseInt(get(r, 'wday', 0), 10) % 7]}요일`;
+    }
+    const day = parseInt(get(r, 'day', 1), 10);
+    const dt = day >= 31 ? '말일' : `${day}일`;
+    return c === 'Y' ? `매년 ${parseInt(get(r, 'ymonth', 1), 10)}월 ${dt}` : `매달 ${dt}`;
+  }
 
+  /** r: item·income·expense·code·day·start·end·memo·pay + cycle('M'|'W'|'Y')·every·wday·ymonth */
   function saveRule(lid, r, rid) {
+    const cyc = r.cycle || 'M';
+    if (!['M', 'W', 'Y'].includes(cyc)) throw new Error('반복 주기가 올바르지 않습니다');
+    const end = r.end || null;
+    const day = cyc === 'W' ? 1 : parseInt(r.day || 1, 10);
     const vals = [r.item || '', parseInt(r.income || 0, 10), parseInt(r.expense || 0, 10), r.code || '',
-      parseInt(r.day, 10), r.start, r.end || null, r.memo || ''];
+      day, r.start, cyc === 'M' ? end : BLOCK_END, r.memo || '', (r.pay || '').trim(), cyc,
+      Math.max(1, parseInt(r.every || 1, 10)), (parseInt(r.wday || 0, 10) % 7 + 7) % 7,
+      Math.min(12, Math.max(1, parseInt(r.ymonth || 1, 10))), cyc !== 'M' ? end : null];
+    const cols = 'item=?,income=?,expense=?,code=?,day=?,start=?,end=?,memo=?,pay=?,cycle=?,every=?,wday=?,ymonth=?,end2=?';
     if (rid) {
       // 규칙을 고쳐도 이미 처리한 기간은 다시 묻지 않음
       const thr = processedThrough(rid);
-      DB.run('UPDATE recurring SET item=?,income=?,expense=?,code=?,day=?,start=?,end=?,memo=?,applied_through=? WHERE id=?',
-        vals.concat([thr || null, rid]));
+      DB.run(`UPDATE recurring SET ${cols},applied_through=? WHERE id=?`, vals.concat([thr || null, rid]));
       return rid;
     }
-    return DB.run('INSERT INTO recurring(item,income,expense,code,day,start,end,memo,ledger_id,created) VALUES(?,?,?,?,?,?,?,?,?,?)',
-      vals.concat([lid, U.today()])).lastId;
+    return DB.run('INSERT INTO recurring(item,income,expense,code,day,start,end,memo,pay,cycle,every,wday,ymonth,end2,ledger_id,created) ' +
+      'VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', vals.concat([lid, U.today()])).lastId;
   }
   const deleteRule = rid => DB.run('DELETE FROM recurring WHERE id=?', [rid]);
 
   /** rule 이 start~end 사이에 입력될 날짜들 */
   function occurrences(rule, start, end) {
+    const re = endOf(rule);
     const lo = start > rule.start ? start : rule.start;
-    const hi = rule.end ? (end < rule.end ? end : rule.end) : end;
+    const hi = re ? (end < re ? end : re) : end;
     const out = [];
     if (lo > hi) return out;
+    const cyc = cycleOf(rule);
+    if (cyc === 'W') {                                // 시작일 이후 첫 그 요일부터 every 주마다
+      const step = 7 * Math.max(1, parseInt(get(rule, 'every', 1), 10));
+      const wd = (parseInt(get(rule, 'wday', 0), 10) % 7 + 7) % 7;
+      let d = U.addDays(rule.start, ((wd - U.weekday(rule.start)) % 7 + 7) % 7);
+      if (d < lo) d = U.addDays(d, Math.ceil((U.ord(lo) - U.ord(d)) / step) * step);
+      for (; d <= hi; d = U.addDays(d, step)) out.push(d);
+      return out;
+    }
+    if (cyc === 'Y') {
+      const mo = Math.min(12, Math.max(1, parseInt(get(rule, 'ymonth', 1), 10)));
+      for (let y = U.parts(lo)[0]; y <= U.parts(hi)[0]; y++) {
+        const d = U.clampDay(y, mo, rule.day);
+        if (lo <= d && d <= hi) out.push(d);
+      }
+      return out;
+    }
     let [y, m] = U.parts(lo);
     const [hy, hm] = U.parts(hi);
     while (y < hy || (y === hy && m <= hm)) {
@@ -365,13 +438,21 @@ const R = (() => {
       for (const { rule: r, date: d } of items) {
         let eid = null;
         if (!skip) {
-          eid = L.addEntry(lid, { date: d, item: r.item, income: r.income, expense: r.expense, code: r.code, memo: r.memo },
+          eid = L.addEntry(lid, { date: d, item: r.item, income: r.income, expense: r.expense, code: r.code, memo: r.memo, pay: get(r, 'pay', '') },
             `recurring:${r.id}`);
         }
         DB.run('INSERT INTO recurring_log(recurring_id,ledger_id,date,item,income,expense,code,entry_id,skipped) VALUES(?,?,?,?,?,?,?,?,?)',
           [r.id, lid, d, r.item, r.income, r.expense, r.code, eid, skip ? 1 : 0]);
       }
     });
+  }
+  /** 그 날의 상태: 'done'(넣음) · 'skipped'(건너뜀) · 'due'(오늘까지인데 아직) · 'later'(앞으로) */
+  function statusOf(rule, d, today) {
+    const r = DB.one('SELECT skipped FROM recurring_log WHERE recurring_id=? AND date=? ORDER BY id LIMIT 1', [rule.id, d]);
+    if (r) return r.skipped ? 'skipped' : 'done';
+    const thr = get(rule, 'applied_through', null);
+    if (thr && d <= String(thr).slice(0, 10)) return 'done';
+    return d <= (today || U.today()) ? 'due' : 'later';
   }
   function log(o) {
     o = o || {};
@@ -383,7 +464,7 @@ const R = (() => {
     if (o.end) { sql += ' AND date<=?'; a.push(o.end); }
     return DB.q(sql + ' ORDER BY date, id', a);
   }
-  return { rules, saveRule, deleteRule, occurrences, processedThrough, pending, apply, log };
+  return { BLOCK_END, CYCLES, cycleOf, endOf, ruleText, rules, saveRule, deleteRule, occurrences, processedThrough, pending, apply, statusOf, log };
 })();
 
 // ════════════════ 결산 보고서·예산·그래프 (services/reports.py) ════════════════
@@ -397,13 +478,23 @@ const Rep = (() => {
     }
     return out;
   }
-  /** [수입계, 지출계] — 0으로 시작하는 계정 = 수입 */
-  function incomeExpense(lid, start, end) {
+  /** {날짜: {계정: 금액}} — 기간 안의 날마다 sumByCode 와 같은 값을 한 번의 질문으로 */
+  function sumByDayCode(lid, start, end) {
+    const out = {};
+    for (const r of DB.q('SELECT date, code, SUM(income) AS inc, SUM(expense) AS exp FROM entry WHERE ledger_id=? AND date BETWEEN ? AND ? GROUP BY date, code', [lid, start, end])) {
+      (out[r.date] || (out[r.date] = {}))[r.code] = L.signedAmount(r.code, r.inc, r.exp);
+    }
+    return out;
+  }
+  /** 계정별 금액 → [수입계, 지출계] — 0으로 시작하는 계정 = 수입 */
+  function ieOf(sums) {
     let inc = 0, exp = 0;
-    for (const [code, v] of Object.entries(sumByCode(lid, start, end))) { if (U.isIncomeCode(code)) inc += v; else exp += v; }
+    for (const [code, v] of Object.entries(sums)) { if (U.isIncomeCode(code)) inc += v; else exp += v; }
     return [inc, exp];
   }
-  const sortStr = arr => arr.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  /** [수입계, 지출계] — 0으로 시작하는 계정 = 수입 */
+  const incomeExpense = (lid, start, end) => ieOf(sumByCode(lid, start, end));
+  const sortStr = arr => arr.slice().sort(U.cmp);
 
   /** [[대분류코드, 대분류명, [[code, 이름], ...]]] — 내역에만 있는 코드도 포함 */
   function structure(lid, extraCodes) {
@@ -449,7 +540,7 @@ const Rep = (() => {
     for (const c of codes) data[c] = [prev[c] || 0, cur[c] || 0, (cur[c] || 0) - (prev[c] || 0), bCur[c] || 0, bNext[c] || 0];
     const rows = build(lid, data, 5, codes);
     const carryPrev = L.balanceBefore(lid, pPrev[0]), carryCur = L.balanceBefore(lid, pCur[0]);
-    const [ip, ep] = incomeExpense(lid, ...pPrev), [ic, ec] = incomeExpense(lid, ...pCur);
+    const [ip, ep] = ieOf(prev), [ic, ec] = ieOf(cur);
     const bsum = (b, inc) => U.sum(Object.entries(b).filter(([c]) => U.isIncomeCode(c) === inc).map(([, v]) => v));
     const bi = bsum(bCur, true), be = bsum(bCur, false), ni = bsum(bNext, true), ne = bsum(bNext, false);
     rows.push(Row('footer', '', '전월 이월금', '', [carryPrev, carryCur, carryCur - carryPrev, null, null]),
@@ -457,9 +548,9 @@ const Rep = (() => {
       Row('footer', '', '지출계', '', [ep, ec, ec - ep, be, ne]),
       Row('footer', '', '잔액', '', [carryPrev + ip - ep, carryCur + ic - ec, (carryCur + ic - ec) - (carryPrev + ip - ep), bi - be, ni - ne]));
     const fmt = p => `${mmdd(p[0])}~${mmdd(p[1])}`;
-    return { title: `${y}년 ${m}월 결산 보고서`,
-      columns: [`지난달 결산\n(${fmt(pPrev)})`, `이달의 결산\n(${fmt(pCur)})`, '증감\n(이달-지난달)', '이번달 예산', '다음달 예산'],
-      rows, periods: [pPrev, pCur, null, null, null], note: `결산일 ${sd}일 기준` };
+    return { title: `${y}년 ${m}월 통계`,
+      columns: [`지난달\n(${fmt(pPrev)})`, `이번 달\n(${fmt(pCur)})`, '증감\n(이번 달-지난달)', '이번 달 예산', '다음 달 예산'],
+      rows, periods: [pPrev, pCur, null, null, null], note: `월 시작일 ${sd}일 기준` };
   }
 
   function yearly(lid, y, sd) {
@@ -472,7 +563,7 @@ const Rep = (() => {
     for (const c of codes) { const v = sums.map(s => s[c] || 0); data[c] = v.concat([U.sum(v)]); }
     const rows = build(lid, data, 13, codes);
     const carry = L.balanceBefore(lid, periods[0][0]);
-    const ie = periods.map(p => incomeExpense(lid, ...p));
+    const ie = sums.map(ieOf);
     let bal = carry;
     const bals = ie.map(([i, e]) => (bal += i - e));
     const carries = [carry].concat(bals.slice(0, -1));
@@ -482,21 +573,22 @@ const Rep = (() => {
       Row('footer', '', '잔액', '', bals.concat([bals[bals.length - 1]])));
     const cols = [];
     for (let m = 1; m <= 12; m++) cols.push(`${m}월`);
-    return { title: `${y}년 결산 보고서`, columns: cols.concat(['합계']), rows, periods: periods.concat([null]),
-      note: `결산일 ${sd}일 기준 · 전기 이월 = 그 기간 시작 전까지의 잔액` };
+    return { title: `${y}년 통계`, columns: cols.concat(['합계']), rows, periods: periods.concat([null]),
+      note: `월 시작일 ${sd}일 기준 · 전기 이월 = 그 기간 시작 전까지의 잔액` };
   }
 
   function daily(lid, y, m) {
     const n = U.monthEnd(y, m);
     const days = [];
     for (let d = 1; d <= n; d++) days.push(U.iso(y, m, d));
-    const sums = days.map(d => sumByCode(lid, d, d));
+    const byDay = sumByDayCode(lid, days[0], days[n - 1]);
+    const sums = days.map(d => byDay[d] || {});
     const codes = new Set(sums.flatMap(s => Object.keys(s)));
     const data = {};
     for (const c of codes) { const v = sums.map(s => s[c] || 0); data[c] = v.concat([U.sum(v)]); }
     const rows = build(lid, data, n + 1, codes);
     const carry = L.balanceBefore(lid, days[0]);
-    const ie = days.map(d => incomeExpense(lid, d, d));
+    const ie = sums.map(ieOf);
     let ci2 = 0, ce = 0;
     const cumI = [], cumE = [], bals = [];
     for (const [i, e] of ie) { ci2 += i; ce += e; cumI.push(ci2); cumE.push(ce); bals.push(carry + ci2 - ce); }
@@ -506,7 +598,7 @@ const Rep = (() => {
       Row('footer', '', '지출누계', '', cumE.concat([ce])),
       Row('footer', '', '전월 이월금', '', [carry].concat(new Array(n - 1).fill(null), [carry])),
       Row('footer', '', '잔액', '', bals.concat([bals[bals.length - 1]])));
-    return { title: `${y}년 ${m}월 일일결산 보고서`, columns: days.map(d => `${Number(d.slice(8))}일`).concat(['합계']),
+    return { title: `${y}년 ${m}월 일별 통계`, columns: days.map(d => `${Number(d.slice(8))}일`).concat(['합계']),
       rows, periods: days.map(d => [d, d]).concat([[days[0], days[days.length - 1]]]), note: '' };
   }
 
@@ -520,11 +612,11 @@ const Rep = (() => {
     const data = {};
     for (const c of codes) data[c] = sums.map(s => s[c] || 0);
     const rows = build(lid, data, 3, codes);
-    const ie = periods.map(p => incomeExpense(lid, ...p));
+    const ie = sums.map(ieOf);
     rows.push(Row('footer', '', '수입계', '', ie.map(x => x[0])), Row('footer', '', '지출계', '', ie.map(x => x[1])),
       Row('footer', '', '수입계 - 지출계', '', ie.map(x => x[0] - x[1])));
     const yy = s => s.slice(2);
-    return { title: `${start} ~ ${end} 결산 보고서`, columns: [`${yy(start)} ~ ${yy(end)}`, `${y}년 결산`, '전체 합계'],
+    return { title: `${start} ~ ${end} 통계`, columns: [`${yy(start)} ~ ${yy(end)}`, `${y}년 전체`, '전체 합계'],
       rows, periods, note: '' };
   }
 
@@ -561,8 +653,8 @@ const Rep = (() => {
       Row('footer', '', '잔액', '', bals.concat([bals[bals.length - 1]])));
     const cols = [];
     for (let m = 1; m <= 12; m++) cols.push(`${m}월 예산`);
-    return { title: `${y}년 예산 보고서`, columns: cols.concat(['합계']), rows, periods: yms.concat([null]),
-      note: '소분류 칸을 눌러 예산 금액을 입력하세요' };
+    return { title: `${y}년 예산`, columns: cols.concat(['합계']), rows, periods: yms.concat([null]),
+      note: '세부 카테고리 칸을 눌러 예산 금액을 입력하세요' };
   }
 
   // ── 그래프 ──
@@ -615,19 +707,19 @@ const A = (() => {
   const FIELDS = {
     bank: [['company', '은행명', 'text*'], ['name', '통장명', 'text*'], ['owner', '예금주', 'text'],
       ['number', '계좌번호', 'text'], ['opening', '초기 잔액', 'money'], ['x.password', '비밀번호', 'password'],
-      ['x.issued', '발행일', 'text'], ['x.maturity', '만기일', 'text'], ['active', '사용여부', 'active'], ['memo', '비고', 'memo']],
+      ['x.issued', '발행일', 'text'], ['x.maturity', '만기일', 'text'], ['active', '사용여부', 'active'], ['memo', '메모', 'memo']],
     securities: [['company', '증권사명', 'text*'], ['name', '계좌이름', 'text*'], ['number', '계좌번호', 'text'],
       ['owner', '소유주', 'text'], ['deposit', '추정 예수금', 'money'], ['valuation', '평가금액', 'money'],
-      ['x.valued_on', '최종 평가일', 'date'], ['memo', '비고', 'memo']],
+      ['x.valued_on', '최종 평가일', 'date'], ['memo', '메모', 'memo']],
     insurance: [['company', '보험사명', 'text*'], ['name', '보험 상품명', 'text*'], ['number', '보험증권번호', 'text'],
       ['owner', '계약자', 'text'], ['x.insured', '피보험자', 'text'], ['x.contract_date', '계약일', 'date'],
       ['x.maturity', '만기일', 'date'], ['x.status', '계약상태', ch(INSURANCE_STATUS)],
       ['x.class', '보험구분', ch(INSURANCE_CLASS)], ['x.pay_method', '납입방법', ch(INSURANCE_PAY)],
       ['x.type', '보험종류', ch(INSURANCE_TYPES)], ['x.total_count', '만기 납입횟수', 'int'], ['x.paid_count', '납입횟수', 'int'],
-      ['x.paid_total', '납입보험료 누계', 'money'], ['x.agent', '담당자 및 연락처', 'text'], ['memo', '비고', 'memo']],
+      ['x.paid_total', '납입보험료 누계', 'money'], ['x.agent', '담당자 및 연락처', 'text'], ['memo', '메모', 'memo']],
     property: [['x.ptype', '구분', ch(PROPERTY_TYPES)], ['name', '자산명', 'text*'], ['owner', '소유주/임차인', 'text'],
       ['x.acquired', '취득/임차일자', 'date'], ['valuation', '취득/평가금액', 'money'], ['x.valued_on', '최종 평가일', 'date'],
-      ['loan', '대출금액', 'money'], ['memo', '비고', 'memo']],
+      ['loan', '대출금액', 'money'], ['memo', '메모', 'memo']],
   };
   const CARD_FIELDS = [['company', '카드사명', 'text*'], ['name', '카드명', 'text*'], ['number', '카드번호', 'text'],
     ['x.password', '카드 비밀번호', 'password'], ['x.valid_ym', '유효기간(YYYY-MM)', 'text'],
@@ -635,7 +727,7 @@ const A = (() => {
     ['bill_from_day', '청구기간 시작(일)', 'int'], ['bill_to_month', '청구기간 끝(월)', 'billmonth'],
     ['bill_to_day', '청구기간 끝(일)', 'int'], ['bank_account_id', '결제 통장', 'bank'],
     ['x.limit', '카드사용한도', 'money'], ['x.cash_limit', '현금서비스 한도', 'money'],
-    ['x.loan_limit', '대출한도', 'money'], ['x.issued', '발행일', 'date'], ['memo', '비고', 'memo']];
+    ['x.loan_limit', '대출한도', 'money'], ['x.issued', '발행일', 'date'], ['x.perf', '월 실적 목표', 'money'], ['memo', '메모', 'memo']];
   const ACCOUNT_COLS = new Set(['sort', 'name', 'company', 'owner', 'number', 'opening', 'valuation', 'loan', 'deposit', 'active', 'memo']);
   const CARD_COLS = new Set(['sort', 'company', 'name', 'number', 'pay_day', 'bill_from_month', 'bill_from_day', 'bill_to_month',
     'bill_to_day', 'bank_account_id', 'memo']);
@@ -661,22 +753,24 @@ const A = (() => {
   const accounts = kind => (kind ? DB.q('SELECT * FROM account WHERE kind=? ORDER BY sort, id', [kind])
     : DB.q('SELECT * FROM account ORDER BY kind, sort, id'));
 
-  function saveAccount(kind, values, aid) {
-    const [cols, extra] = split(values, ACCOUNT_COLS);
-    if (aid) {
-      const old = parseExtra((DB.one('SELECT extra FROM account WHERE id=?', [aid]) || {}).extra);
+  /** account·card 저장 공통: 'x.' 값은 extra(JSON)에, 고칠 때는 예전 extra 에 덮어씀. 새로 넣을 때 fixed 를 더하고 sort 가 없으면 맨 뒤 */
+  function saveWithExtra(table, colsList, values, rid, fixed, sortWhere, sortArgs) {
+    const [cols, extra] = split(values, colsList);
+    if (rid) {
+      const old = parseExtra((DB.one(`SELECT extra FROM ${table} WHERE id=?`, [rid]) || {}).extra);
       Object.assign(old, extra);
       cols.extra = JSON.stringify(old);
       const keys = Object.keys(cols);
-      DB.run(`UPDATE account SET ${keys.map(k => k + '=?').join(',')} WHERE id=?`, keys.map(k => cols[k]).concat([aid]));
-      return aid;
+      DB.run(`UPDATE ${table} SET ${keys.map(k => k + '=?').join(',')} WHERE id=?`, keys.map(k => cols[k]).concat([rid]));
+      return rid;
     }
     cols.extra = JSON.stringify(extra);
-    cols.kind = kind;
-    if (cols.sort === undefined) cols.sort = DB.val('SELECT COALESCE(MAX(sort),0)+1 AS v FROM account WHERE kind=?', [kind]);
+    Object.assign(cols, fixed || {});
+    if (cols.sort === undefined) cols.sort = DB.val(`SELECT COALESCE(MAX(sort),0)+1 AS v FROM ${table}${sortWhere || ''}`, sortArgs || []);
     const keys = Object.keys(cols);
-    return DB.run(`INSERT INTO account(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`, keys.map(k => cols[k])).lastId;
+    return DB.run(`INSERT INTO ${table}(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`, keys.map(k => cols[k])).lastId;
   }
+  const saveAccount = (kind, values, aid) => saveWithExtra('account', ACCOUNT_COLS, values, aid, { kind }, ' WHERE kind=?', [kind]);
   const deleteAccount = aid => DB.run('DELETE FROM account WHERE id=?', [aid]);
 
   function move(table, rid, delta, where, args) {
@@ -731,7 +825,7 @@ const A = (() => {
   function deleteTx(tid, withEntry) {
     DB.tx(() => {
       const r = DB.one('SELECT entry_id, link_id FROM account_tx WHERE id=?', [tid]);
-      if (withEntry && r && r.entry_id) DB.run('DELETE FROM entry WHERE id=?', [r.entry_id]);
+      if (withEntry && r && r.entry_id) { Trash.put([r.entry_id], 'asset'); DB.run('DELETE FROM entry WHERE id=?', [r.entry_id]); }   // 가계부 내역은 휴지통으로
       if (r && r.link_id) DB.run('DELETE FROM account_tx WHERE id=?', [r.link_id]);   // 이체는 짝도 함께
       DB.run('DELETE FROM account_tx WHERE id=?', [tid]);
     });
@@ -756,21 +850,7 @@ const A = (() => {
 
   // ── 신용카드 ──
   const cards = () => DB.q('SELECT * FROM card ORDER BY sort, id');
-  function saveCard(values, cid) {
-    const [cols, extra] = split(values, CARD_COLS);
-    if (cid) {
-      const old = parseExtra((DB.one('SELECT extra FROM card WHERE id=?', [cid]) || {}).extra);
-      Object.assign(old, extra);
-      cols.extra = JSON.stringify(old);
-      const keys = Object.keys(cols);
-      DB.run(`UPDATE card SET ${keys.map(k => k + '=?').join(',')} WHERE id=?`, keys.map(k => cols[k]).concat([cid]));
-      return cid;
-    }
-    cols.extra = JSON.stringify(extra);
-    if (cols.sort === undefined) cols.sort = DB.val('SELECT COALESCE(MAX(sort),0)+1 AS v FROM card');
-    const keys = Object.keys(cols);
-    return DB.run(`INSERT INTO card(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`, keys.map(k => cols[k])).lastId;
-  }
+  const saveCard = (values, cid) => saveWithExtra('card', CARD_COLS, values, cid);
   const deleteCard = cid => DB.run('DELETE FROM card WHERE id=?', [cid]);
 
   function billingWindow(card, payY, payM) {
@@ -1030,7 +1110,7 @@ const Cal = (() => {
 
 // ════════════════ CSV·암호 (services/backup.py, util.py) ════════════════
 const Bk = (() => {
-  const CSV_HEADER = ['날짜', '품목', '수입', '지출', '계정코드', '계정과목', '메모'];
+  const CSV_HEADER = ['날짜', '내용', '수입', '지출', '카테고리 번호', '카테고리', '메모'];
   function csvCell(v) {
     const s = v === null || v === undefined ? '' : String(v);
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -1076,8 +1156,8 @@ const Bk = (() => {
       try { d = toDate(r[0]); } catch (_) { errors.push([n, `날짜 형식 오류: ${r[0]}`]); return; }
       try { inc = U.parseMoney(r[2]); exp = U.parseMoney(r[3]); } catch (_) { errors.push([n, `금액 오류: ${r[2]}, ${r[3]}`]); return; }
       const code = r[4].trim();
-      if (!r[1].trim()) { errors.push([n, '품목이 비어 있음']); return; }
-      if (!validCodes.has(code)) { errors.push([n, `없는 계정코드: ${code}`]); return; }
+      if (!r[1].trim()) { errors.push([n, '내용이 비어 있음']); return; }
+      if (!validCodes.has(code)) { errors.push([n, `없는 카테고리 번호: ${code}`]); return; }
       if (!inc && !exp) { errors.push([n, '수입·지출이 모두 0']); return; }
       rows.push({ date: d, item: r[1].trim(), income: inc, expense: exp, code, memo: r[6].trim() });
     });

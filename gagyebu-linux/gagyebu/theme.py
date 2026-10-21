@@ -759,8 +759,8 @@ def _basic_palette(pal0):
 # ── 순서 (이 PC에만 저장) ──
 NAV_PAGES = ('LedgerPage', 'SearchPage', 'ReportsPage', 'GraphPage', 'RecurringPage', 'AssetsPage', 'CalendarPage',
              'AddressPage', 'DiaryPage', 'MemoPage', 'SettingsPage')
-LEDGER_PARTS = (('nav', '달 이동·단추 줄'), ('stories', '지출 많은 계정 동그라미 (피드) · 많이 쓴 곳 (타임라인)'), ('table', '내역 목록'),
-                ('summary', '이달의 현황 (피드: 프로필 머리, 타임라인: 고정된 글)'))
+LEDGER_PARTS = (('nav', '달 이동·단추 줄'), ('stories', '지출 많은 카테고리 동그라미 (피드) · 많이 쓴 곳 (타임라인)'), ('table', '내역 목록'),
+                ('summary', '이번 달 요약 (피드: 프로필 머리, 타임라인: 고정된 글)'))
 
 
 def _key_order(saved, all_keys):

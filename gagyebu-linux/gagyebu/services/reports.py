@@ -4,6 +4,15 @@ from dataclasses import dataclass, field
 
 from ..util import add_months, iso, is_income_code, month_end, settle_period
 from . import ledger as L
+from .. import db
+
+
+def settle_day(con):
+    """월 시작일 (설정 값, 없거나 잘못되면 1). 안드로이드판 Rep.settleDay 와 같음"""
+    try:
+        return int(db.get_meta(con, 'settle_day', 1) or 1) or 1
+    except (TypeError, ValueError):
+        return 1
 
 
 @dataclass
@@ -32,15 +41,29 @@ def _sum_by_code(con, lid, start, end):
     return out
 
 
-def _income_expense(con, lid, start, end):
-    """(수입계, 지출계) — 계정 기준: 0으로 시작하는 계정 = 수입."""
+def _sum_by_day_code(con, lid, start, end):
+    """{날짜: {계정: 금액}} — 기간 안의 날마다 _sum_by_code 와 같은 값을 한 번의 질문으로"""
+    out = {}
+    for r in con.execute('SELECT date, code, SUM(income) inc, SUM(expense) exp FROM entry '
+                         'WHERE ledger_id=? AND date BETWEEN ? AND ? GROUP BY date, code', (lid, iso(start), iso(end))):
+        out.setdefault(r['date'], {})[r['code']] = L.signed_amount(r['code'], r['inc'], r['exp'])
+    return out
+
+
+def _ie_of(sums):
+    """계정별 금액 → (수입계, 지출계) — 0으로 시작하는 계정 = 수입"""
     inc = exp = 0
-    for code, v in _sum_by_code(con, lid, start, end).items():
+    for code, v in sums.items():
         if is_income_code(code):
             inc += v
         else:
             exp += v
     return inc, exp
+
+
+def _income_expense(con, lid, start, end):
+    """(수입계, 지출계) — 계정 기준: 0으로 시작하는 계정 = 수입."""
+    return _ie_of(_sum_by_code(con, lid, start, end))
 
 
 def _structure(con, lid, extra_codes=()):
@@ -84,8 +107,8 @@ def monthly(con, lid, y, m, settle_day=1):
     rows = _build(con, lid, data, 5, codes)
     carry_prev = L.balance_before(con, lid, p_prev[0])
     carry_cur = L.balance_before(con, lid, p_cur[0])
-    ip, ep = _income_expense(con, lid, *p_prev)
-    ic, ec = _income_expense(con, lid, *p_cur)
+    ip, ep = _ie_of(prev)
+    ic, ec = _ie_of(cur)
     bi = sum(v for c, v in b_cur.items() if is_income_code(c))
     be = sum(v for c, v in b_cur.items() if not is_income_code(c))
     ni = sum(v for c, v in b_next.items() if is_income_code(c))
@@ -96,10 +119,10 @@ def monthly(con, lid, y, m, settle_day=1):
              Row('footer', '', '잔액', values=[carry_prev + ip - ep, carry_cur + ic - ec,
                                               (carry_cur + ic - ec) - (carry_prev + ip - ep), bi - be, ni - ne])]
     fmt = lambda p: f'{p[0]:%m-%d}~{p[1]:%m-%d}'
-    return Report(f'{y}년 {m}월 결산 보고서',
-                  [f'지난달 결산\n({fmt(p_prev)})', f'이달의 결산\n({fmt(p_cur)})', '증감\n(이달-지난달)',
-                   '이번달 예산', '다음달 예산'], rows, [p_prev, p_cur, None, None, None],
-                  note=f'결산일 {settle_day}일 기준')
+    return Report(f'{y}년 {m}월 통계',
+                  [f'지난달\n({fmt(p_prev)})', f'이번 달\n({fmt(p_cur)})', '증감\n(이번 달-지난달)',
+                   '이번 달 예산', '다음 달 예산'], rows, [p_prev, p_cur, None, None, None],
+                  note=f'월 시작일 {settle_day}일 기준')
 
 
 def yearly(con, lid, y, settle_day=1):
@@ -109,7 +132,7 @@ def yearly(con, lid, y, settle_day=1):
     data = {c: [s.get(c, 0) for s in sums] + [sum(s.get(c, 0) for s in sums)] for c in codes}
     rows = _build(con, lid, data, 13, codes)
     carry = L.balance_before(con, lid, periods[0][0])
-    ie = [_income_expense(con, lid, *p) for p in periods]
+    ie = [_ie_of(s) for s in sums]
     bal, bals = carry, []
     for i, e in ie:
         bal += i - e
@@ -119,19 +142,20 @@ def yearly(con, lid, y, settle_day=1):
              Row('footer', '', '수입계', values=[i for i, _ in ie] + [sum(i for i, _ in ie)]),
              Row('footer', '', '지출계', values=[e for _, e in ie] + [sum(e for _, e in ie)]),
              Row('footer', '', '잔액', values=bals + [bals[-1]])]
-    return Report(f'{y}년 결산 보고서', [f'{m}월' for m in range(1, 13)] + ['합계'], rows, periods + [None],
-                  note=f'결산일 {settle_day}일 기준 · 전기 이월 = 그 기간 시작 전까지의 잔액')
+    return Report(f'{y}년 통계', [f'{m}월' for m in range(1, 13)] + ['합계'], rows, periods + [None],
+                  note=f'월 시작일 {settle_day}일 기준 · 전기 이월 = 그 기간 시작 전까지의 잔액')
 
 
 def daily(con, lid, y, m):
     n = month_end(y, m)
     days = [dt.date(y, m, d) for d in range(1, n + 1)]
-    sums = [_sum_by_code(con, lid, d, d) for d in days]
+    by_day = _sum_by_day_code(con, lid, days[0], days[-1])
+    sums = [by_day.get(d.isoformat(), {}) for d in days]
     codes = set().union(*sums)
     data = {c: [s.get(c, 0) for s in sums] + [sum(s.get(c, 0) for s in sums)] for c in codes}
     rows = _build(con, lid, data, n + 1, codes)
     carry = L.balance_before(con, lid, days[0])
-    ie = [_income_expense(con, lid, d, d) for d in days]
+    ie = [_ie_of(s) for s in sums]
     ci = ce = 0
     cum_i, cum_e, bals = [], [], []
     for i, e in ie:
@@ -146,7 +170,7 @@ def daily(con, lid, y, m):
              Row('footer', '', '지출누계', values=cum_e + [ce]),
              Row('footer', '', '전월 이월금', values=[carry] + [None] * (n - 1) + [carry]),
              Row('footer', '', '잔액', values=bals + [bals[-1]])]
-    return Report(f'{y}년 {m}월 일일결산 보고서', [f'{d.day}일' for d in days] + ['합계'], rows,
+    return Report(f'{y}년 {m}월 일별 통계', [f'{d.day}일' for d in days] + ['합계'], rows,
                   [(d, d) for d in days] + [(days[0], days[-1])])
 
 
@@ -159,12 +183,12 @@ def custom(con, lid, start, end):
     codes = set().union(*sums)
     data = {c: [s.get(c, 0) for s in sums] for c in codes}
     rows = _build(con, lid, data, 3, codes)
-    ie = [_income_expense(con, lid, *p) for p in periods]
+    ie = [_ie_of(s) for s in sums]
     rows += [Row('footer', '', '수입계', values=[i for i, _ in ie]),
              Row('footer', '', '지출계', values=[e for _, e in ie]),
              Row('footer', '', '수입계 - 지출계', values=[i - e for i, e in ie])]
-    return Report(f'{start} ~ {end} 결산 보고서',
-                  [f'{start:%y-%m-%d} ~ {end:%y-%m-%d}', f'{start.year}년 결산', '전체 합계'], rows, periods)
+    return Report(f'{start} ~ {end} 통계',
+                  [f'{start:%y-%m-%d} ~ {end:%y-%m-%d}', f'{start.year}년 전체', '전체 합계'], rows, periods)
 
 
 # ── 예산 ────────────────────────────────────────────────
@@ -173,12 +197,17 @@ def budgets(con, lid, ym):
             con.execute('SELECT code, amount FROM budget WHERE ledger_id=? AND ym=?', (lid, ym))}
 
 
-def set_budget(con, lid, ym, code, amount):
+def _put_budget(con, lid, ym, code, amount):
+    """예산 한 칸 넣기·바꾸기 (0 이면 지움). 저장(commit)은 부르는 쪽이"""
     if amount:
         con.execute('INSERT INTO budget VALUES(?,?,?,?) ON CONFLICT(ledger_id,ym,code) DO UPDATE SET amount=excluded.amount',
                     (lid, ym, code, int(amount)))
     else:
         con.execute('DELETE FROM budget WHERE ledger_id=? AND ym=? AND code=?', (lid, ym, code))
+
+
+def set_budget(con, lid, ym, code, amount):
+    _put_budget(con, lid, ym, code, amount)
     con.commit()
 
 
@@ -186,11 +215,7 @@ def set_budgets(con, lid, yms, amounts):
     """여러 달에 같은 예산을 한꺼번에 (예산 정하기 창). amounts: {계정: 금액} — 0 이면 그 달 예산을 지움"""
     for ym in yms:
         for code, amount in amounts.items():
-            if amount:
-                con.execute('INSERT INTO budget VALUES(?,?,?,?) ON CONFLICT(ledger_id,ym,code) DO UPDATE SET amount=excluded.amount',
-                            (lid, ym, code, int(amount)))
-            else:
-                con.execute('DELETE FROM budget WHERE ledger_id=? AND ym=? AND code=?', (lid, ym, code))
+            _put_budget(con, lid, ym, code, amount)
     con.commit()
 
 
@@ -211,8 +236,8 @@ def budget_year(con, lid, y):
              Row('footer', '', '수입계', values=inc + [sum(inc)]),
              Row('footer', '', '지출계', values=exp + [sum(exp)]),
              Row('footer', '', '잔액', values=bals + [bals[-1]])]
-    return Report(f'{y}년 예산 보고서', [f'{m}월 예산' for m in range(1, 13)] + ['합계'], rows, yms + [None],
-                  note='소분류 칸을 두 번 눌러 예산 금액을 입력하세요')
+    return Report(f'{y}년 예산', [f'{m}월 예산' for m in range(1, 13)] + ['합계'], rows, yms + [None],
+                  note='세부 카테고리 칸을 두 번 눌러 예산 금액을 입력하세요')
 
 
 # ── 그래프 ──────────────────────────────────────────────

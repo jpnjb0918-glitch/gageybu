@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 알림 줄 작은 아이콘 (흰 단색): 가계부 공책 + 연필 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5,3h10a2,2 0,0 1,2 2v4.2l-2,2V5H5v14h6.3l-0.4,2H5a2,2 0,0 1,-2,-2V5a2,2 0,0 1,2,-2zM7,7h6v1.6H7zM7,10.5h6v1.6H7zM7,14h3.5v1.6H7zM19.6,10.6l1.8,1.8 -7.2,7.2 -2.5,0.7 0.7,-2.5z" />
+</vector>

@@ -23,6 +23,7 @@ from gagyebu import db  # noqa: E402
 from gagyebu import theme as TH  # noqa: E402
 from gagyebu.services import backup as B  # noqa: E402
 from gagyebu.services import ledger as L  # noqa: E402
+from gagyebu.services import catemoji as E  # noqa: E402
 
 path = os.path.join(tmp, 'g.sqlite3')
 con = db.connect(path)
@@ -129,7 +130,7 @@ try:
     want = w.con.execute('SELECT COUNT(*) FROM entry WHERE ledger_id=? AND code=? AND date BETWEEN ? AND ?',
                          (w.lid, code, T.replace(day=1).isoformat(), (T.replace(day=28) + dt.timedelta(days=4)).replace(day=1).isoformat())).fetchone()[0]
     check('지출 많은 계정 동그라미 → 그 계정·이 달만 검색', type(sp).__name__ == 'SearchPage' and sp.table.rowCount() == want > 0
-          and labels == {L.code_label(L.category_map(w.con, w.lid), code)}, f'{code} {labels} {sp.table.rowCount()}/{want}')
+          and labels == {E.deco(E.emoji_map(w.con, w.lid), code, L.code_label(L.category_map(w.con, w.lid), code))}, f'{code} {labels} {sp.table.rowCount()}/{want}')
     w.compose()
     settle()
     check('왼쪽 줄 [새 내역] → 가계부 입력하기', type(w.stack.currentWidget().widget()).__name__ == 'LedgerPage')

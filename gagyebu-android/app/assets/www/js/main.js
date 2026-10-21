@@ -8,8 +8,8 @@ const App = (() => {
   const DEFAULTS = { theme: 'retro', font: 'pixel', fontsize: 'm', marquee: 'true', minimi: 'b16', mood: MOODS[0], motto: '', budget_card: 'true' };
   const SIZES = { pixel: { s: 13, m: 14, l: 16, xl: 18 }, system: { s: 14, m: 15, l: 17, xl: 19 } };
   // 메뉴: 순서는 사용자가 바꿀 수 있음 (앞 4개 = 아래 탭, 나머지 = 더보기 화면)
-  const NAV = { ledger: ['가계부', 'a22'], calendar: ['달력', 'b11'], report: ['결산', 'b30'], assets: ['자산', 'a04'],
-    search: ['검색', 'b23'], graph: ['그래프', 'b26'], recurring: ['예약 입력', 'b38'], anniv: ['기념일', 'b11'],
+  const NAV = { ledger: ['가계부', 'a22'], calendar: ['달력', 'b11'], report: ['통계', 'b30'], assets: ['자산', 'a04'],
+    search: ['검색', 'b23'], graph: ['그래프', 'b26'], recurring: ['고정 수입·지출', 'b38'], anniv: ['기념일', 'b11'],
     contacts: ['주소록', 'a13'], diary: ['일기장', 'b33'], memo: ['메모장', 'a19'], settings: ['설정', 'b08'], help: ['도움말', 'b02'] };
   const NAV_TABS = 4;
   const MORE = ['더보기', 'a10'];
@@ -18,7 +18,7 @@ const App = (() => {
     anniv: 'gift', contacts: 'user', diary: 'book', memo: 'note', settings: 'gear', help: 'help', more: 'more' };
   const navIcon = k => NAV_ICON[k] || 'dots';
   // 가계부 화면 구성: 덩어리 순서도 바꿀 수 있음
-  const LAYOUT = { monthnav: '달 이동 (◀ 10월 ▶)', stories: '지출 많은 계정 동그라미 (피드 테마)', stats: '이달 수입·지출 요약', budget: '이달 예산 막대·무지출', opts: '보기 설정 (전체 기간·최근 것 위로)', list: '내역 목록' };
+  const LAYOUT = { monthnav: '달 이동 (◀ 10월 ▶)', stories: '지출 많은 카테고리 동그라미 (피드 테마)', stats: '이달 수입·지출 요약', budget: '이달 예산 막대·무지출', opts: '보기 설정 (전체 기간·최신순)', list: '내역 목록' };
   const st = { lid: null, page: 'ledger', params: {}, history: [], prefs: {} };
   let N = null;
   let ui = {};
@@ -207,7 +207,7 @@ const App = (() => {
         <div class="line1">
           <div class="minimi"><img alt=""></div>
           <div class="grow"><div class="hompy-title">☆ 우리집 가계부 ☆</div><div class="hompy-sub"></div></div>
-          <button class="ledger-pick" aria-haspopup="listbox" title="장부 고르기"><span class="lp-name"></span><span class="lp-dd">▾</span></button>
+          <button class="ledger-pick" aria-haspopup="listbox" title="가계부 고르기"><span class="lp-name"></span><span class="lp-dd">▾</span></button>
         </div>
         <div class="todaybar"><span class="pill"></span></div>
         <div class="marquee"><span></span></div>
@@ -250,7 +250,8 @@ const App = (() => {
     nav.classList.toggle('icons', sns);
     nav.innerHTML = tabKeys().map(k => {
       const [label, s] = navLabel(k);
-      if (!sns) return `<button data-tab="${k}"><img src="${UI.sticker(s)}" alt="">${label}</button>`;
+      // 긴 이름(고정 수입·지출)은 낱말 사이에서만 줄바꿈
+      if (!sns) return `<button data-tab="${k}"><img src="${UI.sticker(s)}" alt=""><span class="lb">${label.split(' ').map(w => `<span class="nw">${U.esc(w)}</span>`).join(' ')}</span></button>`;
       // 피드: 마지막 '더보기' = 내 미니미 동그라미 (프로필 탭처럼)
       const face = k === 'more' && layoutOf(theme()) === 'feed' ? `<span class="me"><img src="${UI.sticker(pref('minimi'))}" alt=""></span>` : UI.icon(navIcon(k));
       return `<button data-tab="${k}" aria-label="${U.esc(label)}" title="${U.esc(label)}">${face}<span class="lb">${U.esc(label)}</span></button>`;
@@ -284,15 +285,14 @@ const App = (() => {
   function ledgerPicker() {
     const ls = L.ledgers();
     const cnt = Object.fromEntries(DB.q('SELECT ledger_id AS l, COUNT(*) AS n FROM entry GROUP BY ledger_id').map(r => [r.l, r.n]));
-    const AV = ['#E8833A', '#E0525B', '#9457D6', '#3B7DDD', '#2E9E5B', '#139A9A', '#D24E8E', '#66788F'];
-    const face = name => { let h = 0; for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0; return `<span class="lp-av" style="background:${AV[h % AV.length]}">${U.esc(Array.from(name.trim())[0] || '?')}</span>`; };
+    const face = name => `<span class="lp-av" style="background:${UI.avatarColor(name)}">${U.esc(Array.from(name.trim())[0] || '?')}</span>`;
     const body = UI.el(`<ul class="lp-list">${ls.map(l => `<li data-lid="${l.id}" class="${l.id === st.lid ? 'on' : ''}">${face(l.name)}
         <span class="nm"><b>${U.esc(l.name)}</b><small>내역 ${(cnt[l.id] || 0).toLocaleString('en-US')}건</small></span>
         <span class="ck">${l.id === st.lid ? '✓' : ''}</span></li>`).join('')}
       <li class="sep" aria-hidden="true"></li>
-      <li data-act="new"><span class="lp-ic">${UI.icon('add')}</span><span class="nm"><b>새 장부 만들기</b></span><span class="ck"></span></li>
-      <li data-act="manage"><span class="lp-ic">${UI.icon('gear')}</span><span class="nm"><b>장부 관리</b></span><span class="ck"></span></li></ul>`);
-    const sh = UI.sheet({ title: '장부 고르기', body });
+      <li data-act="new"><span class="lp-ic">${UI.icon('add')}</span><span class="nm"><b>새 가계부 만들기</b></span><span class="ck"></span></li>
+      <li data-act="manage"><span class="lp-ic">${UI.icon('gear')}</span><span class="nm"><b>가계부 관리</b></span><span class="ck"></span></li></ul>`);
+    const sh = UI.sheet({ title: '가계부 고르기', body });
     UI.on(body, 'li[data-lid]', 'click', (e, li) => { sh.close(); const id = Number(li.dataset.lid); if (id !== st.lid) selectLedger(id); });
     UI.on(body, 'li[data-act]', 'click', (e, li) => { sh.close(); if (li.dataset.act === 'new') Pages.settings.newLedger(); else Pages.settings.ledgerSheet(); });
     return sh;
@@ -337,6 +337,7 @@ const App = (() => {
   }
   function render(keepScroll) {
     const P = Pages[st.page];
+    if (typeof Money !== 'undefined') Money.forget();      // 카테고리 그림·결제수단 이름은 그릴 때마다 새로 읽음 (1.8.0)
     const top = keepScroll ? ui.content.scrollTop : 0;
     UI.$$('.fab').forEach(x => x.remove());
     document.body.classList.remove('fab-away');
@@ -496,6 +497,7 @@ const App = (() => {
 
   function start() {
     st.lid = Number(pref('last_lid')) || null;
+    Money.onStart();                 // 휴지통 30일 지난 것 지우기 · 카테고리 그림 처음 넣기 · 매일 알림 다시 걸기 (1.8.0)
     renderShell();
     applyTheme();
     reloadLedgers();

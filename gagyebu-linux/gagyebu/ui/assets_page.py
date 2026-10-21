@@ -1,21 +1,24 @@
 """자산관리: 은행통장·신용카드·증권·보험·부동산/기타 + 순자산 요약."""
 import json
 
-from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QLabel,
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox, QLabel,
                              QLineEdit, QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 from PyQt6.QtCore import Qt
 
+from .. import theme as T
 from ..services import assets as A
 from ..services import ledger as L
 from ..util import fmt_money
-from .widgets import (CENTER, INCOME_COLOR, CodeCombo, DateEdit, FormDialog, MoneyEdit, MonthNav, button, cell, confirm, error,
-                      export_csv, fill, h, info, make_table, money_cell, selected_ids)
+from .widgets import (CENTER, CodeCombo, DateEdit, FormDialog, INCOME_COLOR, MoneyEdit, MonthNav, button, cell,
+                      confirm, error, export_csv, fill, h, info, make_table, money_cell, ok_cancel, selected_id,
+                      selected_ids)
 
 COLS = {
-    'bank': ['은행명', '통장명', '예금주', '계좌번호', '잔액', '사용여부', '비고'],
-    'securities': ['증권사', '계좌이름', '소유주', '추정 예수금', '평가금액', '최종 평가일', '비고'],
-    'insurance': ['보험사명', '상품명', '계약자', '계약일', '납입보험료 누계', '계약상태', '비고'],
-    'property': ['구분', '자산명', '소유주', '취득/평가금액', '대출금액', '최종 평가일', '비고'],
+    'bank': ['은행명', '통장명', '예금주', '계좌번호', '잔액', '사용여부', '메모'],
+    'securities': ['증권사', '계좌이름', '소유주', '추정 예수금', '평가금액', '최종 평가일', '메모'],
+    'insurance': ['보험사명', '상품명', '계약자', '계약일', '납입보험료 누계', '계약상태', '메모'],
+    'property': ['구분', '자산명', '소유주', '취득/평가금액', '대출금액', '최종 평가일', '메모'],
 }
 NOTE = {'bank': '사용중인 통장의 잔액(초기 잔액 + 입금 − 출금)이 자산으로 계산됩니다.',
         'securities': '평가금액만 자산으로 계산되고, 거래 내용은 기록용입니다.',
@@ -25,7 +28,7 @@ NOTE = {'bank': '사용중인 통장의 잔액(초기 잔액 + 입금 − 출금
 
 class LedgerLink(QWidget):
     """'장부에도 동시저장' 선택 칸."""
-    def __init__(self, con, app, label='장부에도 동시저장'):
+    def __init__(self, con, app, label='가계부에도 함께 저장'):
         super().__init__()
         self.con, self.app = con, app
         self.chk = QCheckBox(label)
@@ -36,8 +39,8 @@ class LedgerLink(QWidget):
         f = QFormLayout(self)
         f.setContentsMargins(0, 0, 0, 0)
         f.addRow(self.chk)
-        f.addRow('장부', self.ledger)
-        f.addRow('계정과목', self.code)
+        f.addRow('가계부', self.ledger)
+        f.addRow('카테고리', self.code)
         self.chk.toggled.connect(self._en)
         self._en(False)
 
@@ -68,7 +71,7 @@ class AccountTab(QWidget):
         self.list = make_table(COLS[kind], stretch=len(COLS[kind]) - 1)
         self.list.itemSelectionChanged.connect(self.load_txs)
         self.list.doubleClicked.connect(lambda *_: self.edit())
-        self.txs = make_table(['거래일자', '적요', '입금액', '출금액', '잔액' if kind == 'bank' else '누계', '메모', '장부'],
+        self.txs = make_table(['날짜', '내용', '입금액', '출금액', '잔액' if kind == 'bank' else '누계', '메모', '가계부'],
                               stretch=5)
         self.txs.itemSelectionChanged.connect(self._tx_selected)
         self.date = DateEdit()
@@ -80,8 +83,8 @@ class AccountTab(QWidget):
         self.save_btn = button('거래 저장', self.save_tx)
         form = QGroupBox('거래 입력')
         fl = QFormLayout(form)
-        fl.addRow('거래일자', self.date)
-        fl.addRow('적요', self.summary)
+        fl.addRow('날짜', self.date)
+        fl.addRow('내용', self.summary)
         fl.addRow('입금액', self.dep)
         fl.addRow('출금액', self.wd)
         fl.addRow('메모', self.memo)
@@ -112,8 +115,7 @@ class AccountTab(QWidget):
         QVBoxLayout(self).addWidget(sp)
 
     def aid(self):
-        ids = selected_ids(self.list)
-        return ids[0] if ids else None
+        return selected_id(self.list)
 
     def refresh(self):
         cur = self.aid()
@@ -165,7 +167,7 @@ class AccountTab(QWidget):
 
     def delete(self):
         aid = self.aid()
-        if aid and confirm(self, '선택한 항목과 그 거래 내역을 모두 삭제할까요?\n(장부에 동시저장된 내역은 남습니다)'):
+        if aid and confirm(self, '선택한 항목과 그 거래 내역을 모두 삭제할까요?\n(가계부에 함께 저장된 내역은 남습니다)'):
             A.delete_account(self.con, aid)
             self.page.changed()
 
@@ -237,7 +239,7 @@ class AccountTab(QWidget):
         else:
             lid, code = self.link.target()
             if self.link.chk.isChecked() and not code:
-                error(self, '장부 동시저장: 계정과목을 고르세요.')
+                error(self, '가계부에 함께 저장하려면 카테고리를 고르세요.')
                 return
             A.add_tx(self.con, aid, tx, lid, code)
         self.new_tx()
@@ -250,7 +252,7 @@ class AccountTab(QWidget):
         t = self.con.execute('SELECT * FROM account_tx WHERE id=?', (ids[0],)).fetchone()
         if not confirm(self, '선택한 거래를 삭제할까요?'):
             return
-        with_entry = bool(t['entry_id']) and confirm(self, '장부에 함께 저장된 내역도 삭제할까요?')
+        with_entry = bool(t['entry_id']) and confirm(self, '가계부에 함께 저장된 내역도 삭제할까요?')
         A.delete_tx(self.con, t['id'], with_entry)
         self.new_tx()
         self.page.changed()
@@ -269,17 +271,14 @@ class PayDialog(QDialog):
             self.bank.setCurrentIndex(self.bank.findData(card['bank_account_id']))
             self.bank_chk.setChecked(True)
         self.bank_chk.setEnabled(self.bank.count() > 0)
-        self.link = LedgerLink(con, app, '장부에 지출로 기록')
+        self.link = LedgerLink(con, app, '가계부에 지출로 기록')
         self.link.load()
         f = QFormLayout(self)
         f.addRow(QLabel(f"<b>{card['name']}</b>  {count}건  결제 금액 <b>{fmt_money(total)}원</b>"))
         f.addRow('결제일', self.date)
         f.addRow(self.bank_chk, self.bank)
         f.addRow(self.link)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        bb.button(QDialogButtonBox.StandardButton.Ok).setText('결제 처리')
-        bb.accepted.connect(self.accept)
-        bb.rejected.connect(self.reject)
+        bb = ok_cancel(self, '결제 처리')
         f.addRow(bb)
 
 
@@ -287,7 +286,8 @@ class CardTab(QWidget):
     def __init__(self, page):
         super().__init__()
         self.page, self.app, self.con = page, page.app, page.con
-        self.list = make_table(['카드사', '카드명', '카드번호', '결제일', '이번 결제월 미결제', '미결제 총액', '비고'], stretch=6)
+        self.list = make_table(['카드사', '카드명', '카드번호', '결제일', '이번 결제월 미결제', '미결제 총액', '이번 달 실적', '메모'],
+                               stretch=7)
         self.list.itemSelectionChanged.connect(self.load_txs)
         self.list.doubleClicked.connect(lambda *_: self.edit())
         self.nav = MonthNav()
@@ -295,7 +295,7 @@ class CardTab(QWidget):
         self.paid = QComboBox()
         self.paid.addItems(['미결제', '결제완료', '모두보기'])
         self.paid.currentIndexChanged.connect(lambda *_: self.load_txs())
-        self.txs = make_table(['거래일자', '적요', '결제금액', '수수료', '합계', '회차', '결제일', '결제여부', '메모'],
+        self.txs = make_table(['날짜', '내용', '결제금액', '수수료', '합계', '회차', '결제일', '결제여부', '메모'],
                               stretch=8, multi=True)
         self.tx_lbl = QLabel()
         self.date = DateEdit()
@@ -309,8 +309,8 @@ class CardTab(QWidget):
         self.memo = QLineEdit()
         form = QGroupBox('카드 사용 입력')
         fl = QFormLayout(form)
-        fl.addRow('거래일자', self.date)
-        fl.addRow('적요', self.summary)
+        fl.addRow('날짜', self.date)
+        fl.addRow('내용', self.summary)
         fl.addRow('사용금액(전체)', self.amount)
         fl.addRow('수수료(전체)', self.fee)
         fl.addRow('할부개월', self.months)
@@ -345,8 +345,7 @@ class CardTab(QWidget):
         QVBoxLayout(self).addWidget(sp)
 
     def cid(self):
-        ids = selected_ids(self.list)
-        return ids[0] if ids else None
+        return selected_id(self.list)
 
     def card(self):
         c = self.cid()
@@ -358,10 +357,18 @@ class CardTab(QWidget):
     def refresh(self):
         cur = self.cid()
         rows = []
+        from ..services import money as M          # 카드 실적: 그 달 가계부 내역 중 결제수단이 그 카드인 지출 (1.8.0)
+        perf = {p['id']: p for p in M.card_perf(self.con, self.nav.y, self.nav.m)}
+        tn = T.tone()
         for c in A.cards(self.con):
             this = sum(r['amount'] + r['fee'] for r in A.card_txs(self.con, c['id'], self.ym(), 0))
+            p = perf.get(c['id'])
+            ptxt = '' if not p or (not p['target'] and not p['spent']) else (
+                f"{fmt_money(p['spent'])}" + (f" / {fmt_money(p['target'])} ({p['pct']}%)" if p['target'] else ''))
+            pc = cell(ptxt, CENTER, color=QColor(tn['in']) if p and p['target'] and p['spent'] >= p['target'] else None)
+            pc.setToolTip('그 달(1일~말일) 가계부 내역 중 결제수단을 이 카드로 고른 지출 합계 / 카드 정보의 월 실적 목표')
             rows.append([cell(c['company'], data=c['id']), c['name'], c['number'], cell(f"{c['pay_day']}일", CENTER),
-                         money_cell(this, 'out'), money_cell(A.card_unpaid_total(self.con, c['id']), 'out'), c['memo']])
+                         money_cell(this, 'out'), money_cell(A.card_unpaid_total(self.con, c['id']), 'out'), pc, c['memo']])
         fill(self.list, rows)
         for r in range(self.list.rowCount()):
             if self.list.item(r, 0).data(Qt.ItemDataRole.UserRole) == cur:
@@ -489,14 +496,14 @@ class CardTab(QWidget):
     def unpay(self):
         ids = selected_ids(self.txs)
         if ids and confirm(self, '선택한 내역의 결제를 취소할까요?\n같은 결제로 처리된 회차도 함께 미결제로 돌아가고, '
-                                 '그 결제 때 통장 출금·장부 지출로 기록한 내역도 삭제됩니다.'):
+                                 '그 결제 때 통장 출금·가계부 지출로 기록한 내역도 삭제됩니다.'):
             n = A.unpay_card(self.con, ids)
             info(self, f'{n}건을 미결제로 되돌렸습니다.')
             self.page.changed()
 
 
 class AssetsPage(QWidget):
-    title = '자산관리'
+    title = '자산'
 
     def __init__(self, app):
         super().__init__()

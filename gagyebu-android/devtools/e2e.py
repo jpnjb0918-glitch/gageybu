@@ -3,6 +3,7 @@ import functools
 import http.server
 import json
 import os
+import re
 import socketserver
 import sqlite3
 import subprocess
@@ -156,7 +157,7 @@ with sync_playwright() as p:
     pg.click('.navbar button[data-tab=report]')
     pg.wait_for_selector('table.rep')
     shot(pg, '15-report-monthly')
-    row = pg.locator('table.rep tr').filter(has_text='31 외식')
+    row = pg.locator('table.rep tr').filter(has_text=re.compile(r'31 (\S+ )?외식'))     # 1.8.0: 카테고리 그림이 붙을 수 있음 ('31 🍜 외식')
     row.locator('td').nth(4).click()          # 0=이름, 1~5 = 값 → 4번째 값(이번달 예산)
     fill_sheet(pg, 'amount', '100000')
     sheet_btn(pg, '저장')
@@ -301,7 +302,7 @@ print(len(con.execute('SELECT * FROM entry').fetchall()), A.summary(con)['카드
     pg2.wait_for_selector('.navbar', timeout=15000)
     check('맞는 암호 → 들어감', pg2.locator('.navbar').count() == 1)
     pg2.wait_for_timeout(900)
-    check('시작할 때 남은 예약 입력 창 (PC판과 같음)', pg2.locator('.sheet .sh .t', has_text='예약된 수입·지출 자동입력').count() == 1)
+    check('시작할 때 남은 예약 입력 창 (PC판과 같음)', pg2.locator('.sheet .sh .t', has_text='고정 수입·지출 자동 입력').count() == 1)
     pg2.evaluate('while (UI.closeTop()) {}')
 
     print('■ 가져오기 (PC판 표본 자료)')

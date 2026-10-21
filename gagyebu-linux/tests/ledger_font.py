@@ -79,7 +79,7 @@ try:
     w.reload_ledgers()
     cb = w.ledger_combo
     items = [(cb.itemText(i), cb.itemData(i)) for i in range(cb.count())]
-    check('목록 끝에 [＋ 새 장부 만들기…]·[장부 관리…]', items[-2:] == [('＋ 새 장부 만들기…', '__new'), ('장부 관리…', '__manage')], str(items))
+    check('목록 끝에 [＋ 새 가계부 만들기…]·[가계부 관리…]', items[-2:] == [('＋ 새 가계부 만들기…', '__new'), ('가계부 관리…', '__manage')], str(items))
     shown = {}
 
     def fill(dlg):
@@ -94,7 +94,7 @@ try:
     w._ledger_selected(cb.currentIndex())
     settle()
     new = [r for r in L.ledgers(w.con) if r['name'] == '모임 장부']
-    check('[＋ 새 장부 만들기…] → 이름·만드는 방법 창', shown.get('title') == '새 장부' and len(shown.get('how', [])) == 3 and shown.get('how_cur') == 1, str(shown))
+    check('[＋ 새 장부 만들기…] → 이름·만드는 방법 창', shown.get('title') == '새 가계부' and len(shown.get('how', [])) == 3 and shown.get('how_cur') == 1, str(shown))
     check('새 장부가 생기고 그 장부로 바뀜', len(new) == 1 and w.lid == new[0]['id'] and cb.currentData() == new[0]['id'] and cb.currentText() == '모임 장부')
     check('기본 방법 = 지금 장부의 계정과목만 복사', new and L.category_map(w.con, new[0]['id']) == L.category_map(w.con, lid0)
           and w.con.execute('SELECT COUNT(*) FROM entry WHERE ledger_id=?', (new[0]['id'],)).fetchone()[0] == 0)

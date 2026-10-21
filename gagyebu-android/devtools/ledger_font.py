@@ -79,7 +79,7 @@ with sync_playwright() as p:
     pg.locator('.overlay:last-child .lp-list li[data-act=new]').click()
     pg.wait_for_timeout(300)
     sh = pg.locator('.overlay').last
-    check('[새 장부 만들기] → 새 장부 창', sh.locator('.sh .t').inner_text() == '새 장부')
+    check('[새 장부 만들기] → 새 장부 창', sh.locator('.sh .t').inner_text() == '새 가계부')
     pg.screenshot(path=os.path.join(OUT, 'feed-new-ledger.png'))
     sh.locator('input[data-k=name], [data-k=name] input, input').first.fill('모임 장부')
     sh.locator('.sf').get_by_role('button').last.click()
@@ -96,7 +96,7 @@ with sync_playwright() as p:
     pg.wait_for_timeout(250)
     pg.locator('.overlay:last-child .lp-list li[data-act=manage]').click()
     pg.wait_for_timeout(300)
-    check('[장부 관리] → 장부 관리 창 (모임 장부 보임)', pg.locator('.overlay').last.locator('.sh .t').inner_text() == '장부 관리'
+    check('[장부 관리] → 장부 관리 창 (모임 장부 보임)', pg.locator('.overlay').last.locator('.sh .t').inner_text() == '가계부 관리'
           and '모임 장부' in pg.locator('.overlay').last.inner_text())
     br.close()
 

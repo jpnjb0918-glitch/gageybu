@@ -119,6 +119,13 @@ CREATE TABLE IF NOT EXISTS debt(
 CREATE TABLE IF NOT EXISTS debt_pay(
     id INTEGER PRIMARY KEY, debt_id INTEGER NOT NULL REFERENCES debt(id) ON DELETE CASCADE,
     date TEXT NOT NULL, amount INTEGER NOT NULL, memo TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS trash(
+    id INTEGER PRIMARY KEY, ledger_id INTEGER NOT NULL REFERENCES ledger(id) ON DELETE CASCADE,
+    deleted TEXT NOT NULL, why TEXT NOT NULL DEFAULT '', entry TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS trash_photo(
+    id INTEGER PRIMARY KEY, trash_id INTEGER NOT NULL REFERENCES trash(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT '', mime TEXT NOT NULL DEFAULT 'image/jpeg', data BLOB NOT NULL, created TEXT);
+CREATE INDEX IF NOT EXISTS trash_photo_t ON trash_photo(trash_id);
 CREATE TABLE IF NOT EXISTS legacy_raw(id INTEGER PRIMARY KEY, source TEXT, tbl TEXT, data TEXT)`;
 
   const DEFAULT_GROUPS = [['0', '수입'], ['1', '공과금'], ['2', '교육비'], ['3', '식비'], ['4', '교통·통신비'],
@@ -133,6 +140,14 @@ CREATE TABLE IF NOT EXISTS legacy_raw(id INTEGER PRIMARY KEY, source TEXT, tbl T
     ['제헌절', 7, 17, 0, 0], ['광복절', 8, 15, 0, 1], ['추석 연휴', 8, 14, 1, 1], ['추석', 8, 15, 1, 1],
     ['추석 연휴', 8, 16, 1, 1], ['국군의 날', 10, 1, 0, 0], ['개천절', 10, 3, 0, 1], ['한글날', 10, 9, 0, 1],
     ['성탄절', 12, 25, 0, 1]];
+
+  // 1.8.0 에 더한 열 (PC판 db.py NEW_COLUMNS 와 같은 순서) — 예전 판은 모르는 열이라 그냥 둠
+  const NEW_COLUMNS = [
+    ['entry', [['pay', "TEXT NOT NULL DEFAULT ''"]]],
+    ['favorite', [['pay', "TEXT NOT NULL DEFAULT ''"]]],
+    ['recurring', [['pay', "TEXT NOT NULL DEFAULT ''"], ['cycle', "TEXT NOT NULL DEFAULT 'M'"], ['every', 'INTEGER NOT NULL DEFAULT 1'],
+      ['wday', 'INTEGER NOT NULL DEFAULT 0'], ['ymonth', 'INTEGER NOT NULL DEFAULT 1'], ['end2', 'TEXT']]],
+  ];
 
   let N = null;          // window.GagyebuNative
   let depth = 0;         // 묶음 저장(트랜잭션) 깊이
@@ -190,6 +205,10 @@ CREATE TABLE IF NOT EXISTS legacy_raw(id INTEGER PRIMARY KEY, source TEXT, tbl T
     if (!cols.includes('applied_through')) run('ALTER TABLE recurring ADD COLUMN applied_through TEXT');
     const acols = q('PRAGMA table_info(account_tx)').map(r => r.name);
     if (!acols.includes('link_id')) run('ALTER TABLE account_tx ADD COLUMN link_id INTEGER');   // 자산 간 이체의 짝 (1.7.0)
+    for (const [table, list] of NEW_COLUMNS) {
+      const have = q(`PRAGMA table_info(${table})`).map(r => r.name);
+      for (const [name, decl] of list) if (!have.includes(name)) run(`ALTER TABLE ${table} ADD COLUMN ${name} ${decl}`);
+    }
     if (getMeta('schema_version') === null) setMeta('schema_version', SCHEMA_VERSION);
     if (!one('SELECT 1 AS x FROM ledger LIMIT 1')) tx(() => seedDefaults(true, true));
   }

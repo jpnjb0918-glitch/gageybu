@@ -5,44 +5,54 @@ import tempfile
 
 from PyQt6.QtCore import QMimeData, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QInputDialog,
-                             QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
+                             QGroupBox, QInputDialog, QLabel, QLineEdit, QPlainTextEdit, QRadioButton, QSpinBox,
+                             QTabWidget, QVBoxLayout, QWidget)
 
 from .. import db
 from ..services import backup as B
+from ..services import catemoji as E
 from ..services import importer as I
 from ..services import ledger as L
 from ..services import order as O
-from ..util import CODE_CHARS, check_password, hash_password
-from .widgets import (CENTER, ask_order, button, cell, confirm, error, fill, h, info, make_table, selected_ids,
-                      set_tone)
+from ..util import CODE_CHARS, check_password, hash_password, is_income_code
+from .widgets import (CENTER, ask_order, button, cell, confirm, error, fill, h, info, make_table, ok_cancel,
+                      selected_id, selected_ids, set_tone)
 
 
 class CategoryTab(QWidget):
-    """대분류(0~9, a~z; 0=수입) · 소분류(대분류+한 자리) 관리."""
+    """카테고리(대분류: 0~9, a~z — 0=수입) · 세부 카테고리(카테고리 번호 + 한 자리) 관리."""
     def __init__(self, page):
         super().__init__()
         self.page = page
-        self.gt = make_table(['코드', '대분류'], stretch=1)
+        self.gt = make_table(['번호', '카테고리'], stretch=1)
         self.gt.itemSelectionChanged.connect(self.load_cats)
-        self.ct = make_table(['계정코드', '계정과목', '사용 건수'], stretch=1)
-        self.info = QLabel('대분류 0번은 수입, 나머지(1~9, a~z)는 지출입니다. 계정코드 = 대분류 + 소분류 한 자리\n'
-                           '순서는 입력할 때 고르는 목록과 결산 보고서에 그대로 쓰이고, 휴대폰판에서도 같습니다.')
+        self.ct = make_table(['번호', '세부 카테고리', '내역 수'], stretch=1)
+        self.ct.doubleClicked.connect(lambda *_: self.rename_cat())
+        self.info = QLabel('0번 카테고리는 수입, 나머지(1~9, a~z)는 지출입니다. 내역에는 세부 카테고리를 고릅니다.\n'
+                           '순서는 입력할 때 고르는 목록과 통계에 그대로 쓰이고, 휴대폰판에서도 같습니다.')
         set_tone(self.info, 'note')
-        gbox = QGroupBox('대분류')
+        self.info.setWordWrap(True)
+        # 단추는 표 위에 (창이 낮거나 좁아도 [삭제]가 가려지지 않게)
+        gbox = QGroupBox('카테고리')
         gl = QVBoxLayout(gbox)
+        gl.addWidget(h(button('추가', self.add_group), button('이름 바꾸기', self.rename_group),
+                       button('삭제', self.del_group), button('그림…', self.emoji_group, '카테고리 이름 앞에 붙일 그림(이모지)'),
+                       button('순서 바꾸기…', self.order_groups), 'stretch'))
         gl.addWidget(self.gt)
-        gl.addWidget(h(button('추가', self.add_group), button('이름 변경', self.rename_group),
-                       button('삭제', self.del_group), button('순서 바꾸기…', self.order_groups)))
-        cbox = QGroupBox('소분류 (계정과목)')
+        cbox = QGroupBox('세부 카테고리')
         cl = QVBoxLayout(cbox)
-        cl.addWidget(self.ct)
-        cl.addWidget(h(button('추가', self.add_cat), button('이름 변경', self.rename_cat),
-                       button('위로', lambda: self.move(-1)), button('아래로', lambda: self.move(1)),
+        cl.addWidget(h(button('추가', self.add_cat), button('이름 바꾸기', self.rename_cat),
+                       button('삭제', self.del_cat, '고른 세부 카테고리 지우기 (내역이 있으면 다른 카테고리로 옮길 수 있음)'),
+                       button('그림…', self.emoji_cat, '세부 카테고리 이름 앞에 붙일 그림 (없으면 카테고리 그림)'), 'stretch'))
+        cl.addWidget(h(button('위로', lambda: self.move(-1)), button('아래로', lambda: self.move(1)),
                        button('순서 바꾸기…', self.order_cats),
-                       button('다른 계정으로 합치기', self.merge), button('삭제', self.del_cat)))
+                       button('다른 카테고리로 옮기기…', self.merge, '이 세부 카테고리의 내역을 모두 다른 곳으로 옮기고 이것은 지움'),
+                       'stretch'))
+        cl.addWidget(self.ct)
         lay = QVBoxLayout(self)
-        lay.addWidget(self.info)
+        lay.addWidget(h(self.info, 'stretch', button('이름 보고 그림 넣기', self.fill_emoji,
+                                                       '그림이 없는 카테고리에 이름에 어울리는 그림을 한꺼번에 넣습니다')))
         lay.addWidget(h(gbox, cbox))
 
     @property
@@ -54,31 +64,36 @@ class CategoryTab(QWidget):
         return self.page.app.lid
 
     def group(self):
-        ids = selected_ids(self.gt)
-        return ids[0] if ids else None
+        return selected_id(self.gt)
 
     def code(self):
-        ids = selected_ids(self.ct)
-        return ids[0] if ids else None
+        return selected_id(self.ct)
 
     def refresh(self):
         cur = self.group()
-        fill(self.gt, [[cell(g['code'], CENTER, data=g['code']), cell(g['name'])] for g in L.groups(self.con, self.lid)])
+        emap = E.emoji_map(self.con, self.lid)
+        fill(self.gt, [[cell(g['code'], CENTER, data=g['code']), cell(E.deco(emap, g['code'], g['name']))]
+                       for g in L.groups(self.con, self.lid)])
         for r in range(self.gt.rowCount()):
             if self.gt.item(r, 0).data(Qt.ItemDataRole.UserRole) == (cur or '0'):
                 self.gt.selectRow(r)
         self.load_cats()
 
-    def load_cats(self):
+    def load_cats(self, sel=None):
         g = self.group()
         rows = L.categories(self.con, self.lid, g) if g is not None else []
-        fill(self.ct, [[cell(c['code'], CENTER, data=c['code']), cell(c['name']),
-                        cell(L.category_usage(self.con, self.lid, c['code'])['entry'], CENTER)] for c in rows])
+        emap = E.emoji_map(self.con, self.lid)
+        n_entry = dict(self.con.execute('SELECT code, COUNT(*) FROM entry WHERE ledger_id=? GROUP BY code', (self.lid,)).fetchall())
+        fill(self.ct, [[cell(c['code'], CENTER, data=c['code']), cell(E.deco(emap, c['code'], c['name'])),
+                        cell(n_entry.get(c['code'], 0), CENTER)] for c in rows])     # 내역 수 (한 번의 질문으로)
+        for r in range(self.ct.rowCount()):
+            if self.ct.item(r, 0).data(Qt.ItemDataRole.UserRole) == sel:
+                self.ct.selectRow(r)
 
     def order_groups(self):
         gs = L.groups(self.con, self.lid)
-        what, keys = ask_order(self, '대분류 순서', [(g['code'], f"({g['code']}) {g['name']}", '') for g in gs],
-                               '', '코드 순으로')
+        what, keys = ask_order(self, '카테고리 순서', [(g['code'], f"({g['code']}) {g['name']}", '') for g in gs],
+                               '', '번호 순으로')
         if what == 'save':
             O.set_group_order(self.con, self.lid, keys)
         elif what == 'reset':
@@ -90,14 +105,14 @@ class CategoryTab(QWidget):
     def order_cats(self):
         g = self.group()
         if g is None:
-            info(self, '왼쪽에서 대분류를 고르세요.')
+            info(self, '왼쪽에서 카테고리를 고르세요.')
             return
         cats = L.categories(self.con, self.lid, g)
         if len(cats) < 2:
-            info(self, '이 대분류에는 소분류가 2개 이상 있어야 합니다.')
+            info(self, '이 카테고리에는 세부 카테고리가 2개 이상 있어야 합니다.')
             return
-        what, keys = ask_order(self, f'소분류 순서 ({g})', [(c['code'], f"{c['code']} {c['name']}", '') for c in cats],
-                               '', '코드 순으로')
+        what, keys = ask_order(self, f'세부 카테고리 순서 ({g})', [(c['code'], f"{c['code']} {c['name']}", '') for c in cats],
+                               '', '번호 순으로')
         if what == 'save':
             O.set_category_order(self.con, self.lid, keys)
         elif what == 'reset':
@@ -110,9 +125,9 @@ class CategoryTab(QWidget):
         used = {g['code'] for g in L.groups(self.con, self.lid)}
         free = [c for c in CODE_CHARS[1:] if c not in used]
         if not free:
-            error(self, '더 만들 수 있는 대분류가 없습니다 (최대 36개).')
+            error(self, '더 만들 수 있는 카테고리가 없습니다 (최대 36개).')
             return
-        name, ok = QInputDialog.getText(self, '대분류 추가', f'새 대분류 이름 (코드 {free[0]})')
+        name, ok = QInputDialog.getText(self, '카테고리 추가', f'새 카테고리 이름 (번호 {free[0]})')
         if ok and name.strip():
             L.set_group(self.con, self.lid, free[0], name.strip())
             self.page.changed()
@@ -121,9 +136,9 @@ class CategoryTab(QWidget):
         g = self.group()
         if g is None or g == '0':
             if g == '0':
-                error(self, '0번(수입) 대분류 이름은 바꿀 수 없습니다.')
+                error(self, '수입 카테고리(0번) 이름은 바꿀 수 없습니다.')
             return
-        name, ok = QInputDialog.getText(self, '대분류 이름 변경', '새 이름', text=L.group_map(self.con, self.lid)[g])
+        name, ok = QInputDialog.getText(self, '카테고리 이름 바꾸기', '새 이름', text=L.group_map(self.con, self.lid)[g])
         if ok and name.strip():
             L.set_group(self.con, self.lid, g, name.strip())
             self.page.changed()
@@ -132,8 +147,14 @@ class CategoryTab(QWidget):
         g = self.group()
         if g is None:
             return
+        if g == '0':
+            error(self, '수입 카테고리(0번)는 삭제할 수 없습니다.')
+            return
+        name = L.group_map(self.con, self.lid).get(g, g)
+        n = len(L.categories(self.con, self.lid, g))
+        msg = f"카테고리 '{name}'을(를) 삭제할까요?" + (f'\n안의 세부 카테고리 {n}개도 함께 지워집니다.' if n else '')
         try:
-            if confirm(self, f'대분류 {g} 를 삭제할까요?'):
+            if confirm(self, msg):
                 L.delete_group(self.con, self.lid, g)
                 self.page.changed()
         except ValueError as e:
@@ -142,14 +163,14 @@ class CategoryTab(QWidget):
     def add_cat(self):
         g = self.group()
         if g is None:
-            error(self, '먼저 왼쪽에서 대분류를 고르세요.')
+            error(self, '먼저 왼쪽에서 카테고리를 고르세요.')
             return
         used = {c['code'] for c in L.categories(self.con, self.lid, g)}
         free = [g + c for c in CODE_CHARS if g + c not in used]
         if not free:
-            error(self, '이 대분류에는 더 만들 수 없습니다 (최대 36개).')
+            error(self, '이 카테고리에는 더 만들 수 없습니다 (최대 36개).')
             return
-        name, ok = QInputDialog.getText(self, '소분류 추가', f'새 계정과목 이름 (계정코드 {free[0]})')
+        name, ok = QInputDialog.getText(self, '세부 카테고리 추가', f'새 세부 카테고리 이름 (번호 {free[0]})')
         if ok and name.strip():
             L.set_category(self.con, self.lid, free[0], name.strip())
             self.page.changed()
@@ -158,7 +179,7 @@ class CategoryTab(QWidget):
         c = self.code()
         if not c:
             return
-        name, ok = QInputDialog.getText(self, '계정과목 이름 변경', '새 이름', text=L.category_map(self.con, self.lid)[c])
+        name, ok = QInputDialog.getText(self, '세부 카테고리 이름 바꾸기', '새 이름', text=L.category_map(self.con, self.lid)[c])
         if ok and name.strip():
             L.set_category(self.con, self.lid, c, name.strip())
             self.page.changed()
@@ -167,57 +188,125 @@ class CategoryTab(QWidget):
         c = self.code()
         if c:
             L.move_category_order(self.con, self.lid, c, d)
-            self.load_cats()
-            for r in range(self.ct.rowCount()):
-                if self.ct.item(r, 0).data(Qt.ItemDataRole.UserRole) == c:
-                    self.ct.selectRow(r)
+            self.load_cats(c)
+
+    def _emoji(self, code, name):
+        from .money_ui import EmojiDialog
+        d = EmojiDialog(self, E.emoji_map(self.con, self.lid).get(code, ''), name)
+        if d.exec() and d.value is not None:
+            E.set_emoji(self.con, self.lid, code, d.value)
+            self.page.changed()
+
+    def emoji_group(self):
+        g = self.group()
+        if g is not None:
+            self._emoji(g, L.group_map(self.con, self.lid).get(g, g))
+
+    def emoji_cat(self):
+        c = self.code()
+        if c:
+            self._emoji(c, L.category_map(self.con, self.lid).get(c, c))
+        else:
+            info(self, '오른쪽 목록에서 세부 카테고리를 고르세요.')
+
+    def fill_emoji(self):
+        n = E.fill_defaults(self.con, self.lid)
+        self.page.changed()
+        info(self, f'{n}곳에 그림을 넣었습니다.' if n else '이름에 어울리는 그림을 더 찾지 못했습니다 (이미 넣은 그림은 그대로).')
 
     def merge(self):
         c = self.code()
         if not c:
+            info(self, '오른쪽 목록에서 옮길 세부 카테고리를 고르세요.')
             return
-        cmap = L.category_map(self.con, self.lid)
-        choices = [f'{k}  {v}' for k, v in sorted(cmap.items()) if k != c]
-        pick, ok = QInputDialog.getItem(self, '다른 계정으로 합치기',
-                                        f"'{cmap[c]}'({c})로 입력된 모든 내역·예약·예산을 옮길 계정", choices, 0, False)
-        if ok and pick and confirm(self, f"{c} {cmap[c]} → {pick}\n옮긴 뒤 {c} 계정은 없어집니다. 계속할까요?"):
-            L.merge_category(self.con, self.lid, c, pick.split()[0])
+        d = MoveCategoryDialog(self, self.con, self.lid, c, delete_choice=False)
+        if d.exec() and d.target:
+            L.merge_category(self.con, self.lid, c, d.target)
             self.page.changed()
 
     def del_cat(self):
         c = self.code()
         if not c:
+            info(self, '오른쪽 목록에서 지울 세부 카테고리를 고르세요.')
             return
-        u = L.category_usage(self.con, self.lid, c)
-        msg = f'계정 {c} 를 삭제할까요?'
-        if any(u.values()):
-            msg += (f"\n\n주의: 이 계정으로 입력된 내역 {u['entry']}건, 예약 {u['recurring']}건, 예산 {u['budget']}건도 "
-                    '함께 삭제됩니다 (원본 프로그램과 같은 동작).\n지우지 않으려면 [다른 계정으로 합치기]를 쓰세요.')
-        if confirm(self, msg):
+        name = L.category_map(self.con, self.lid).get(c, c)
+        if not any(L.category_usage(self.con, self.lid, c).values()):
+            if confirm(self, f"세부 카테고리 '{name}'({c})을(를) 삭제할까요?"):
+                L.delete_category(self.con, self.lid, c)
+                self.page.changed()
+            return
+        d = MoveCategoryDialog(self, self.con, self.lid, c, delete_choice=True)
+        if not d.exec():
+            return
+        if d.target:
+            L.merge_category(self.con, self.lid, c, d.target)
+        elif confirm(self, f"'{name}'의 내역·고정 수입·지출·예산까지 모두 지웁니다.\n(내역은 휴지통에 30일 동안 보관되고, "
+                           "고정 수입·지출·예산은 되돌릴 수 없습니다) 정말 지울까요?"):
             L.delete_category(self.con, self.lid, c)
-            self.page.changed()
+        else:
+            return
+        self.page.changed()
+
+
+class MoveCategoryDialog(QDialog):
+    """세부 카테고리 지우기·옮기기: 쓰인 내역을 다른 세부 카테고리로 옮기고 지우거나(target), 내역까지 지움(target=None)"""
+    def __init__(self, parent, con, lid, code, delete_choice=True):
+        super().__init__(parent)
+        self.target = None
+        cmap = L.category_map(con, lid)
+        u = L.category_usage(con, lid, code)
+        self.setWindowTitle(f"세부 카테고리 {'삭제' if delete_choice else '옮기기'} — {cmap.get(code, code)}")
+        used = f"내역 {u['entry']}건 · 고정 수입·지출 {u['recurring']}건 · 예산 {u['budget']}건"
+        self.combo = QComboBox()
+        gmap = L.group_map(con, lid)
+        same = [c for c in L.categories(con, lid) if c['code'] != code and is_income_code(c['code']) == is_income_code(code)]
+        other = [c for c in L.categories(con, lid) if c['code'] != code and c not in same]
+        for c in same + other:
+            self.combo.addItem(f"{gmap.get(c['code'][:1], '')} › {c['name']}  ({c['code']})", c['code'])
+        self.r_move = QRadioButton('다른 세부 카테고리로 옮기고 삭제 (내역은 남음)')
+        self.r_del = QRadioButton('내역까지 모두 삭제')
+        self.r_move.setChecked(True)
+        self.r_move.toggled.connect(self.combo.setEnabled)
+        bb = ok_cancel(self, '삭제' if delete_choice else '옮기기', self._ok)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel(f"'{cmap.get(code, code)}'({code})에 {used}이 있습니다." if delete_choice else
+                             f"'{cmap.get(code, code)}'({code})의 {used}을 옮길 곳을 고르세요. 옮긴 뒤 이 세부 카테고리는 없어집니다."))
+        if delete_choice:
+            lay.addWidget(self.r_move)
+        lay.addWidget(self.combo)
+        if delete_choice:
+            lay.addWidget(self.r_del)
+        lay.addWidget(bb)
+        self.delete_choice = delete_choice
+
+    def _ok(self):
+        if not self.delete_choice or self.r_move.isChecked():
+            self.target = self.combo.currentData()
+            if not self.target:
+                error(self, '옮길 세부 카테고리가 없습니다.')
+                return
+        self.accept()
 
 
 class LedgerTab(QWidget):
     def __init__(self, page):
         super().__init__()
         self.page = page
-        self.t = make_table(['장부명', '내역 수', '잔액'], stretch=0)
+        self.t = make_table(['가계부 이름', '내역 수', '잔액'], stretch=0)
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel('가계부 외에 모임 회비·용돈 등 장부를 여러 개 따로 관리할 수 있습니다. '
-                             '첫 번째 장부는 삭제할 수 없습니다.'))
+        lay.addWidget(QLabel('생활비·용돈·모임 회비처럼 가계부를 여러 개 만들어 따로 적을 수 있습니다. '
+                             '첫 번째 가계부는 삭제할 수 없습니다.'))
         lay.addWidget(self.t)
-        lay.addWidget(h(button('장부 추가', self.add), button('이름 변경', self.rename), button('장부 복사', self.copy),
-                        button('계정과목만 복사', lambda: self.copy(True)), button('데이터 초기화', self.reset),
-                        button('장부 삭제', self.delete), 'stretch'))
+        lay.addWidget(h(button('가계부 추가', self.add), button('이름 바꾸기', self.rename), button('가계부 복사', self.copy),
+                        button('카테고리만 복사', lambda: self.copy(True)), button('내역 비우기', self.reset),
+                        button('가계부 삭제', self.delete), 'stretch'))
 
     @property
     def con(self):
         return self.page.con
 
     def lid(self):
-        ids = selected_ids(self.t)
-        return ids[0] if ids else None
+        return selected_id(self.t)
 
     def refresh(self):
         from ..util import fmt_money
@@ -228,20 +317,20 @@ class LedgerTab(QWidget):
                       for r in L.ledgers(self.con)])
 
     def _name(self, title, text=''):
-        name, ok = QInputDialog.getText(self, title, '장부 이름', text=text)
+        name, ok = QInputDialog.getText(self, title, '가계부 이름', text=text)
         return name.strip() if ok and name.strip() else None
 
     def add(self):
-        n = self._name('장부 추가')
+        n = self._name('가계부 추가')
         if n:
             L.add_ledger(self.con, n)
-            info(self, '새 장부를 만들었습니다. 계정과목 탭에서 계정을 설계하세요 (또는 [계정과목만 복사] 사용).')
+            info(self, '새 가계부를 만들었습니다. 카테고리 탭에서 카테고리를 만드세요 (또는 [카테고리만 복사] 사용).')
             self.page.ledgers_changed()
 
     def rename(self):
         lid = self.lid()
         if lid:
-            n = self._name('장부명 변경', self.t.item(self.t.currentRow(), 0).text())
+            n = self._name('가계부 이름 바꾸기', self.t.item(self.t.currentRow(), 0).text())
             if n:
                 L.rename_ledger(self.con, lid, n)
                 self.page.ledgers_changed()
@@ -249,17 +338,17 @@ class LedgerTab(QWidget):
     def copy(self, codes_only=False):
         lid = self.lid()
         if not lid:
-            error(self, '복사할 장부를 고르세요.')
+            error(self, '복사할 가계부를 고르세요.')
             return
         src = self.t.item(self.t.currentRow(), 0).text()
-        n = self._name('계정과목만 복사' if codes_only else '장부 복사', f'{src} 복사본')
+        n = self._name('카테고리만 복사' if codes_only else '가계부 복사', f'{src} 복사본')
         if n:
             L.add_ledger(self.con, n, copy_from=lid, codes_only=codes_only)
             self.page.ledgers_changed()
 
     def reset(self):
         lid = self.lid()
-        if lid and confirm(self, '선택한 장부의 수입/지출·예산·예약을 모두 지울까요? (계정과목은 남습니다)\n되돌릴 수 없습니다.'):
+        if lid and confirm(self, '선택한 가계부의 내역·예산·고정 수입·지출을 모두 지울까요? (카테고리는 남습니다)\n되돌릴 수 없습니다.'):
             L.reset_ledger(self.con, lid)
             self.page.ledgers_changed()
 
@@ -268,7 +357,7 @@ class LedgerTab(QWidget):
         if not lid:
             return
         try:
-            if confirm(self, '선택한 장부를 완전히 삭제할까요? 되돌릴 수 없습니다.'):
+            if confirm(self, '선택한 가계부를 완전히 삭제할까요? 되돌릴 수 없습니다.'):
                 L.delete_ledger(self.con, lid)
                 self.page.ledgers_changed()
         except ValueError as e:
@@ -280,7 +369,7 @@ class ItemTab(QWidget):
     def __init__(self, page):
         super().__init__()
         self.page = page
-        self.t = make_table(['품목', '사용 횟수'], stretch=0)
+        self.t = make_table(['내용', '사용 횟수'], stretch=0)
         self.min = QSpinBox()
         self.min.setRange(1, 999)
         self.min.valueChanged.connect(self._min)
@@ -306,7 +395,7 @@ class ItemTab(QWidget):
         self.page.app.data_changed()
 
     def add(self):
-        n, ok = QInputDialog.getText(self, '품목 추가', '품목 이름')
+        n, ok = QInputDialog.getText(self, '내용 추가', '내용 이름')
         if ok and n.strip():
             L.set_item_word(self.con, self.page.app.lid, n.strip(), self.min.value())
             self.refresh()
@@ -315,10 +404,10 @@ class ItemTab(QWidget):
         ids = selected_ids(self.t)
         if not ids:
             return
-        n, ok = QInputDialog.getText(self, '품목 수정', '품목 이름', text=ids[0])
+        n, ok = QInputDialog.getText(self, '내용 수정', '내용 이름', text=ids[0])
         if not ok or not n.strip():
             return
-        cnt, ok = QInputDialog.getInt(self, '품목 수정', '사용 횟수', int(self.t.item(self.t.currentRow(), 1).text()), 0)
+        cnt, ok = QInputDialog.getInt(self, '내용 수정', '사용 횟수', int(self.t.item(self.t.currentRow(), 1).text()), 0)
         if ok:
             L.set_item_word(self.con, self.page.app.lid, n.strip(), cnt, ids[0])
             self.refresh()
@@ -534,7 +623,7 @@ class ImportTab(QWidget):
         wl.addWidget(h(button('data 폴더 선택해서 가져오기…', self.import_mdb), 'stretch'))
         csvb = QGroupBox('CSV 내역 불러오기 (원본의 엑셀데이타 불러오기)')
         cl = QVBoxLayout(csvb)
-        cl.addWidget(QLabel('열 순서: 날짜, 품목, 수입, 지출, 계정코드 (계정과목·메모는 있어도 되고 없어도 됨). '
+        cl.addWidget(QLabel('열 순서: 날짜, 내용, 수입, 지출, 카테고리 번호 (카테고리·메모는 있어도 되고 없어도 됨). '
                             '리브레오피스/엑셀에서 CSV로 저장하세요.\n오류가 하나라도 있으면 저장하지 않고 오류 위치를 보여줍니다.'))
         cl.addWidget(h(button('CSV 파일 선택…', self.import_csv), 'stretch'))
         lay = QVBoxLayout(self)
@@ -587,7 +676,7 @@ class ImportTab(QWidget):
                                   '\n'.join(f'  {n}번째 줄: {m}' for n, m in errs[:200]))
             error(self, f'오류가 {len(errs)}개 있어 저장하지 않았습니다. 결과 창을 보고 고쳐 주세요.')
             return
-        if confirm(self, f'{len(rows)}건을 [{app.ledger_name()}] 장부에 입력할까요?'):
+        if confirm(self, f'{len(rows)}건을 [{app.ledger_name()}] 가계부에 입력할까요?'):
             for r in rows:
                 L.add_entry(app.con, app.lid, r, origin='csv', commit=False)
             app.con.commit()
@@ -642,7 +731,7 @@ class ThemeTab(QWidget):
         self.budget_chk = QCheckBox('입력 상자 밑에 이달 예산 막대·무지출 날 보이기')
         self.budget_chk.toggled.connect(self._budget_toggled)
         ol.addRow('', self.budget_chk)
-        ol.addRow('', QLabel('계정과목 순서는 계정과목 탭, 같은 날 내역 순서는 가계부 화면의 [같은 날 순서…]에서 바꿉니다.'))
+        ol.addRow('', QLabel('카테고리 순서는 카테고리 탭, 같은 날 내역 순서는 가계부 화면의 [같은 날 순서…]에서 바꿉니다.'))
         # 이 테마의 색
         cbox = QGroupBox('이 테마의 색')
         from PyQt6.QtWidgets import QGridLayout
@@ -868,10 +957,11 @@ class SettingsPage(QWidget):
         super().__init__()
         self.app, self.con = app, app.con
         self.tabs = QTabWidget()
-        self.parts = [CategoryTab(self), LedgerTab(self), ItemTab(self), GeneralTab(self), ImportTab(self),
+        from .money_ui import PayTab
+        self.parts = [CategoryTab(self), PayTab(self), LedgerTab(self), ItemTab(self), GeneralTab(self), ImportTab(self),
                       ThemeTab(self), UpdateTab(self)]
-        for p, n in zip(self.parts, ['계정과목', '장부 관리', '품목 관리', '암호 · 백업', '자료 가져오기', '화면 꾸미기',
-                                     '업데이트']):
+        for p, n in zip(self.parts, ['카테고리', '결제수단', '가계부 관리', '자주 쓴 내용', '암호 · 백업', '자료 가져오기',
+                                     '화면 꾸미기', '업데이트']):
             self.tabs.addTab(p, n)
         self.tabs.currentChanged.connect(lambda i: self.parts[i].refresh())
         QVBoxLayout(self).addWidget(self.tabs)

@@ -7,10 +7,10 @@
 Object.assign(L, (() => {
   const favorites = lid => DB.q('SELECT * FROM favorite WHERE ledger_id=? ORDER BY sort, id', [lid]);
   function saveFavorite(lid, f, fid) {
-    const vals = [(f.item || '').trim(), parseInt(f.income || 0, 10), parseInt(f.expense || 0, 10), (f.code || '').trim(), (f.memo || '').trim()];
-    if (fid) { DB.run('UPDATE favorite SET item=?,income=?,expense=?,code=?,memo=? WHERE id=?', [...vals, fid]); return fid; }
+    const vals = [(f.item || '').trim(), parseInt(f.income || 0, 10), parseInt(f.expense || 0, 10), (f.code || '').trim(), (f.memo || '').trim(), (f.pay || '').trim()];
+    if (fid) { DB.run('UPDATE favorite SET item=?,income=?,expense=?,code=?,memo=?,pay=? WHERE id=?', [...vals, fid]); return fid; }
     const sort = DB.val('SELECT COALESCE(MAX(sort),0)+1 FROM favorite WHERE ledger_id=?', [lid]);
-    return DB.run('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort) VALUES(?,?,?,?,?,?,?)', [lid, ...vals, sort]).lastId;
+    return DB.run('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,pay,sort) VALUES(?,?,?,?,?,?,?,?)', [lid, ...vals, sort]).lastId;
   }
   const deleteFavorite = fid => DB.run('DELETE FROM favorite WHERE id=?', [fid]);
   function moveFavorite(lid, fid, delta) {
@@ -162,11 +162,13 @@ const Sms = (() => {
     return out;
   }
   /** 후보 하나 → 내역 값. 취소는 지출을 음수로 */
-  function toEntry(p) {
+  /** withPay 를 주면 결제수단도 짐작 (1.8.0: 은행 → 계좌이체, 자산에 넣은 카드 → 그 카드, 그 밖 → 카드) */
+  function toEntry(p, withPay) {
     const memo = [p.card, p.months > 1 ? `${p.months}개월` : '', p.time].filter(Boolean).join(' ');
-    if (p.kind === 'in') return { date: p.date, item: p.item, income: p.amount, expense: 0, memo };
+    const pay = withPay ? Pay.guess(p.card, p.kind) : '';
+    if (p.kind === 'in') return { date: p.date, item: p.item, income: p.amount, expense: 0, memo, pay };
     const sign = p.kind === 'cancel' ? -1 : 1;
-    return { date: p.date, item: p.item + (p.kind === 'cancel' ? ' (취소)' : ''), income: 0, expense: sign * p.amount, memo };
+    return { date: p.date, item: p.item + (p.kind === 'cancel' ? ' (취소)' : ''), income: 0, expense: sign * p.amount, memo, pay };
   }
   // 가게 이름 → 흔한 계정 이름 (PC판 smsparse.HINTS 와 같음)
   const HINTS = [
@@ -221,13 +223,12 @@ const Ins = (() => {
     const [start] = U.settlePeriod(y, m, sd);
     return d >= start ? [y, m] : U.addMonths(y, m, -1);
   }
-  const pct = (a, b) => (b > 0 ? Math.floor(a * 100 / b + 0.5) : null);
+  const pct = U.pct;
   function spentByCode(lid, start, end) {
     const out = {};
     for (const [c, v] of Object.entries(Rep.sumByCode(lid, start, end))) if (!U.isIncomeCode(c)) out[c] = v;
     return out;
   }
-  const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   const dayDiff = (a, b) => U.ord(a) - U.ord(b);
 
   function budgetProgress(lid, y, m, sd, today) {
@@ -241,12 +242,14 @@ const Ins = (() => {
       const s = spent[code] || 0;
       return { code, name: L.codeLabel(cmap, code), budget: b, spent: s, left: b - s, pct: pct(s, b) };
     });
-    rows.sort((x, z) => z.pct - x.pct || z.spent - x.spent || cmpStr(x.code, z.code));
-    const tb = U.sum(Object.values(bud)), ts = U.sum(rows.map(r => r.spent));
+    rows.sort((x, z) => z.pct - x.pct || z.spent - x.spent || U.cmp(x.code, z.code));
+    let tb = U.sum(Object.values(bud)), ts = U.sum(rows.map(r => r.spent));
+    const tot = TBud.get(lid, U.ym(y, m));          // 한 달 전체 예산이 있으면 막대는 지출 전체 / 전체 예산 (1.8.0)
+    if (tot > 0) { tb = tot; ts = Rep.incomeExpense(lid, start, end)[1]; }
     const daysLeft = (start <= today && today <= end) ? dayDiff(end, today) + 1 : (today > end ? 0 : dayDiff(end, start) + 1);
     const left = tb - ts;
     return { rows, budget: tb, spent: ts, left, pct: pct(ts, tb), days_left: daysLeft,
-      per_day: daysLeft > 0 && left > 0 ? Math.floor(left / daysLeft) : 0, start, end };
+      per_day: daysLeft > 0 && left > 0 ? Math.floor(left / daysLeft) : 0, start, end, total: tot > 0 };
   }
   function codeSpent(lid, code, d, sd) {
     const [y, m] = periodOf(d, sd);
@@ -299,7 +302,7 @@ const Ins = (() => {
     const cmap = L.categoryMap(lid);
     const cur = days ? spentByCode(lid, start, upto) : {};
     const prev = days ? spentByCode(lid, ps, pUpto) : {};
-    const top = Object.entries(cur).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0])).slice(0, 3);
+    const top = Object.entries(cur).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1] || U.cmp(a[0], b[0])).slice(0, 3);
     const big = days ? DB.one('SELECT item, expense, date FROM entry WHERE ledger_id=? AND date BETWEEN ? AND ? AND expense>0 ORDER BY expense DESC, date, id LIMIT 1', [lid, start, upto]) : null;
     // 무지출 날은 오늘까지만 셈 (앞으로 올 날은 빼기 — 미리 넣은 카드대금 같은 미래 달)
     const nsEnd = upto < today ? upto : today;

@@ -100,8 +100,9 @@ for th in only:
                 qss = app.styleSheet()
                 check('stop:0 #8FE6E6' in qss and 'alternate-background-color: #F0FBFA' in qss, f'{th} 스타일시트')
         rp = w.goto('ReportsPage')
-        for i, name in enumerate(('월결산', '년결산', '일일결산', '사용자정의', '년예산')):
-            rp.tabs.setCurrentIndex(i)
+        tab_names = [rp.tabs.tabText(k) for k in range(rp.tabs.count())]
+        for name in ('월별', '연간', '일별', '기간', '예산'):
+            rp.tabs.setCurrentIndex(tab_names.index(name))
             app.processEvents()
             v = rp.tabs.currentWidget().view
             t = v.table
@@ -114,7 +115,7 @@ for th in only:
             if z:
                 fg = t.item(z[0], z[1] + 2).foreground().color().name()
                 check(fg == getattr(W, 'ZERO_COLOR', W.INCOME_COLOR).name(), f'{th} {name}: 0 색 {fg}')
-            if i == 0:
+            if name == '월별':
                 shot(f'{th}_결산_{name}')
         lp = w.goto('LedgerPage')
         if th not in TH.SNS_THEMES:

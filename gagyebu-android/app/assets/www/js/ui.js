@@ -235,6 +235,7 @@ const UI = (() => {
   function codeOptions(lid, current, mode, blank) {
     const gs = L.groups(lid);
     const cats = L.categories(lid);
+    const emap = Emo.map(lid);                       // 카테고리 그림 (1.8.0)
     let order = gs.slice();
     if (mode === 'out') order = gs.filter(g => g.code !== '0').concat(gs.filter(g => g.code === '0'));
     let html = blank ? `<option value="">${U.esc(blank)}</option>` : '';
@@ -242,10 +243,10 @@ const UI = (() => {
     for (const g of order) {
       const cs = cats.filter(c => c.code.slice(0, 1) === g.code);
       if (!cs.length) continue;
-      html += `<optgroup label="(${U.esc(g.code)}) ${U.esc(g.name)}">` + cs.map(c => {
+      html += `<optgroup label="(${U.esc(g.code)}) ${U.esc(Emo.deco(emap, g.code, g.name))}">` + cs.map(c => {
         const sel = c.code === current;
         if (sel) found = true;
-        return `<option value="${U.esc(c.code)}"${sel ? ' selected' : ''}>${U.esc(c.code)} ${U.esc(c.name)}</option>`;
+        return `<option value="${U.esc(c.code)}"${sel ? ' selected' : ''}>${U.esc(c.code)} ${U.esc(Emo.deco(emap, c.code, c.name))}</option>`;
       }).join('') + '</optgroup>';
     }
     if (!found) html = `<option value="${U.esc(current)}" selected>(미분류 ${U.esc(current)})</option>` + html;
@@ -320,6 +321,10 @@ const UI = (() => {
     on(s, 'button', 'click', (e, b) => { $$('button', s).forEach(x => x.classList.toggle('on', x === b)); onChange(b.dataset.k); });
     return s;
   }
+  // 동그라미 얼굴 색: 이름마다 늘 같은 색 (가계부 고르기·타임라인·피드가 같이 씀)
+  const AV_COLORS = ['#E8833A', '#E0525B', '#9457D6', '#3B7DDD', '#2E9E5B', '#139A9A', '#D24E8E', '#66788F'];
+  const hashOf = str => { let h = 0; for (const ch of String(str || '')) h = (h * 31 + ch.codePointAt(0)) >>> 0; return h; };
+  const avatarColor = name => AV_COLORS[hashOf(name) % AV_COLORS.length];
   const empty = (msg, st) => `<div class="empty"><img src="${sticker(st || 'b39')}" alt="">${U.esc(msg)}</div>`;
 
   // ── 선 아이콘 (피드·타임라인 테마). class="f" 인 부분은 '켜짐'일 때 채움 ──
@@ -375,6 +380,8 @@ const UI = (() => {
     chat: '<path d="M5.5 4.5h13A2.5 2.5 0 0 1 21 7v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3.5v-3.5h-1A2.5 2.5 0 0 1 3 15V7a2.5 2.5 0 0 1 2.5-2.5z"/><path d="M7.5 9.5h9M7.5 13h6"/>',
     target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle class="dot" cx="12" cy="12" r="1.3"/>',
     swap: '<path d="M4 8h15M15.5 4.5 19 8l-3.5 3.5M20 16H5M8.5 12.5 5 16l3.5 3.5"/>',
+    // 1.8.0: 휴지통
+    trash: '<path d="M4.5 6.5h15M9.5 6.5V4.2h5v2.3M6.5 6.5l1 13.3a1.4 1.4 0 0 0 1.4 1.2h6.2a1.4 1.4 0 0 0 1.4-1.2l1-13.3M10 10.5v6.5M14 10.5v6.5"/>',
     calc: '<rect x="5" y="2.8" width="14" height="18.4" rx="2.4"/><path d="M8.2 7h7.6M8.6 11.4h.1M12 11.4h.1M15.4 11.4h.1M8.6 14.8h.1M12 14.8h.1M15.4 14.8v3.4M8.6 18.2h.1M12 18.2h.1"/>',
   };
   /** 아이콘 SVG 문자열 (name: ICONS 의 이름) */
@@ -516,5 +523,5 @@ const UI = (() => {
 
   return { $, $$, el, on, sticker, money, moneyCls, toast, sheet, closeTop, isOpen, alert: alertBox, confirm, tableBox, calcPad, isExpr,
     formHtml, form, readForm, formSheet, bindMoney, codeOptions, monthNav, yearNav, monthPicker, seg, dialog, empty, reorder, colorPicker, icon, ICONS,
-    normHex, hexToHsl, hslToHex };
+    normHex, hexToHsl, hslToHex, hashOf, avatarColor };
 })();

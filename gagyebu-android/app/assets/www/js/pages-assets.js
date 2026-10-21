@@ -101,7 +101,7 @@ Pages.assets = (() => {
         UI.$('[data-dn]', sb).onclick = () => { A.move('account', a.id, 1, 'kind=?', [kind]); UI.toast('순서를 바꿨습니다'); };
       },
       onSave: v => { A.saveAccount(kind, AssetForm.fromForm(v, defs), a ? a.id : null); App.dataChanged(); if (after) after(); },
-      onDelete: a ? close => UI.confirm(`'${a.name}'과(와) 그 거래 내역을 모두 삭제할까요?\n(장부에 같이 저장한 내역은 남습니다)`, '삭제', true).then(ok => {
+      onDelete: a ? close => UI.confirm(`'${a.name}'과(와) 그 거래 내역을 모두 삭제할까요?\n(가계부에 같이 저장한 내역은 남습니다)`, '삭제', true).then(ok => {
         if (ok) { A.deleteAccount(a.id); close(); App.back(); App.dataChanged(); }
       }) : null });
   }
@@ -112,8 +112,12 @@ Pages.assets = (() => {
     c.appendChild(UI.el('<div class="small muted" style="margin-bottom:6px">아직 결제하지 않은 카드 사용액은 부채로 계산됩니다. 할부는 회차별로 나눠 저장합니다.</div>'));
     if (!list.length) c.appendChild(UI.el(UI.empty('등록한 카드가 없어요', 'a04')));
     else {
+      const [ty, tm] = U.parts(U.today());
+      const perf = Object.fromEntries(Perf.cards(ty, tm).map(p => [p.id, p]));      // 이번 달 실적 (1.8.0)
+      const perfTxt = p => (!p ? '' : p.target ? `<div class="tiny ${p.spent >= p.target ? 'in' : 'muted'}">이번 달 실적 ${UI.money(p.spent)} / ${UI.money(p.target)}${p.spent >= p.target ? ' ✓' : ` (${p.pct}%)`}</div>`
+        : p.spent ? `<div class="tiny muted">이번 달 이 카드로 적은 지출 ${UI.money(p.spent)}원</div>` : '');
       c.appendChild(UI.el(`<ul class="list">${list.map(k => `<li class="tap" data-id="${k.id}"><div class="grow"><div class="main-t ellipsis">${U.esc(k.name)}</div>
-        <div class="sub ellipsis">${[k.company, k.number].filter(Boolean).map(U.esc).join(' · ')} · 매월 ${k.pay_day}일 결제</div></div>
+        <div class="sub ellipsis">${[k.company, k.number].filter(Boolean).map(U.esc).join(' · ')} · 매월 ${k.pay_day}일 결제</div>${perfTxt(perf[k.id])}</div>
         <div class="right nowrap"><div class="bold out">${UI.money(A.cardUnpaidTotal(k.id))}</div><div class="tiny muted">미결제</div></div></li>`).join('')}</ul>`));
       UI.on(c, 'li[data-id]', 'click', (e, li) => App.go('card', { id: Number(li.dataset.id) }, true));
     }
@@ -139,7 +143,7 @@ Pages.assets = (() => {
         if (ok) { A.deleteCard(k.id); close(); App.back(); App.dataChanged(); }
       }) : null });
   }
-  return { title: '자산관리', sticker: 'a04', sub: '통장·카드·내 재산 한눈에', render, editAccount, editCard, state: s };
+  return { title: '자산', sticker: 'a04', sub: '통장·카드·내 재산 한눈에', render, editAccount, editCard, state: s };
 })();
 
 // ════════ 통장(계좌) 하나 ════════
@@ -165,7 +169,7 @@ Pages.account = (() => {
     if (!txs.length) c.appendChild(UI.el(UI.empty('거래 내역이 없어요', 'a04')));
     else {
       c.appendChild(UI.el(`<ul class="list">${txs.map(([t, b]) => `<li class="tap" data-t="${t.id}"><div class="grow"><div class="main-t ellipsis"><span class="muted small">${t.date}</span> ${U.esc(t.summary)}</div>
-        <div class="sub ellipsis">${U.esc(t.memo || '')}${t.entry_id ? ' · 장부에도 저장됨' : ''}${t.link_id ? ' · 이체 (짝 거래와 함께 바뀜)' : ''}</div></div>
+        <div class="sub ellipsis">${U.esc(t.memo || '')}${t.entry_id ? ' · 가계부에도 저장됨' : ''}${t.link_id ? ' · 이체 (짝 거래와 함께 바뀜)' : ''}</div></div>
         <div class="right nowrap">${t.deposit ? `<div class="in bold">+${UI.money(t.deposit)}</div>` : ''}${t.withdraw ? `<div class="out bold">-${UI.money(t.withdraw)}</div>` : ''}
         <div class="tiny muted">${a.kind === 'bank' ? '잔액' : '누계'} ${UI.money(b)}</div></div></li>`).join('')}</ul>`));
       UI.on(c, 'li[data-t]', 'click', (e, li) => txSheet(a, txs.find(([t]) => t.id === Number(li.dataset.t))[0]));
@@ -187,11 +191,11 @@ Pages.account = (() => {
   }
   function txSheet(a, t) {
     const lid = App.lid;
-    const fields = [{ k: 'date', label: '거래일자', type: 'date', req: true }, { k: 'summary', label: '적요', type: 'text' },
+    const fields = [{ k: 'date', label: '날짜', type: 'date', req: true }, { k: 'summary', label: '내용', type: 'text' },
       { k: 'deposit', label: '입금액', type: 'money' }, { k: 'withdraw', label: '출금액', type: 'money' }, { k: 'memo', label: '메모', type: 'text' }];
     if (!t) {
-      fields.push({ k: 'to_ledger', label: `장부(${App.ledgerName()})에도 같이 저장 (입금→수입, 출금→지출)`, type: 'check' });
-      fields.push({ k: 'code', label: '장부 계정과목', type: 'code', lid, mode: 'out' });
+      fields.push({ k: 'to_ledger', label: `가계부(${App.ledgerName()})에도 같이 저장 (입금→수입, 출금→지출)`, type: 'check' });
+      fields.push({ k: 'code', label: '가계부 카테고리', type: 'code', lid, mode: 'out' });
     }
     UI.formSheet({ title: t ? '거래 수정' : '거래 추가', fields, values: t || { date: U.today() }, full: true,
       afterOpen: sb => {
@@ -206,7 +210,7 @@ Pages.account = (() => {
         if (!v.deposit && !v.withdraw) throw new Error('입금액 또는 출금액을 입력하세요.');
         if (t) A.updateTx(t.id, v);
         else {
-          if (v.to_ledger && !v.code) throw new Error('장부 계정과목을 고르세요.');
+          if (v.to_ledger && !v.code) throw new Error('가계부 카테고리를 고르세요.');
           A.addTx(a.id, v, v.to_ledger ? lid : null, v.to_ledger ? v.code : null);
         }
         App.dataChanged();
@@ -214,8 +218,8 @@ Pages.account = (() => {
       onDelete: t ? close => {
         const go = withEntry => { A.deleteTx(t.id, withEntry); close(); App.dataChanged(); };
         if (t.entry_id) {
-          UI.sheet({ title: '거래 삭제', body: '<div>이 거래는 장부에도 저장되어 있습니다. 장부 내역도 같이 지울까요?</div>', buttons: [
-            { label: '거래만 삭제', onClick: () => go(false) }, { label: '장부 내역도 삭제', cls: 'danger', onClick: () => go(true) }] });
+          UI.sheet({ title: '거래 삭제', body: '<div>이 거래는 가계부에도 저장되어 있습니다. 가계부 내역도 같이 지울까요?</div>', buttons: [
+            { label: '거래만 삭제', onClick: () => go(false) }, { label: '가계부 내역도 삭제', cls: 'danger', onClick: () => go(true) }] });
         } else UI.confirm('이 거래를 삭제할까요?', '삭제', true).then(ok => { if (ok) go(false); });
       } : null });
   }
@@ -241,7 +245,11 @@ Pages.card = (() => {
     c.appendChild(UI.el(`<div class="box small"><div class="kv"><b>${U.esc(k.name)}</b><span>${U.esc(k.company)}</span></div>
       <div class="kv"><span class="muted">결제일</span><span>매월 ${k.pay_day}일</span></div>
       <div class="kv"><span class="muted">청구기간</span><span>${A.BILL_MONTHS[String(k.bill_from_month)]} ${k.bill_from_day}일 ~ ${A.BILL_MONTHS[String(k.bill_to_month)]} ${k.bill_to_day}일</span></div>
-      <div class="kv"><span class="muted">전체 미결제</span><b class="out">${UI.money(A.cardUnpaidTotal(k.id))}원</b></div></div>`));
+      <div class="kv"><span class="muted">전체 미결제</span><b class="out">${UI.money(A.cardUnpaidTotal(k.id))}원</b></div>${(() => {
+        const [ty, tm] = U.parts(U.today());
+        const p = Perf.cards(ty, tm).find(x => x.id === k.id);
+        return p && p.target ? `<div class="kv"><span class="muted">${tm}월 실적</span><span>${UI.money(p.spent)} / ${UI.money(p.target)}원 ${p.spent >= p.target ? '<b class="in">채움 ✓</b>' : `(${p.pct}%)`}</span></div>` : '';
+      })()}</div>`));
     c.appendChild(UI.monthNav(y, m, (yy, mm) => { s.ym = U.ym(yy, mm); s.sel.clear(); App.render(true); }, (yy, mm) => `${yy}년 ${mm}월 결제분`));
     const rows = A.cardTxs(k.id, s.ym);
     const tot = U.sum(rows.map(r => r.amount + r.fee)), unpaid = U.sum(rows.filter(r => !r.paid).map(r => r.amount + r.fee));
@@ -260,7 +268,7 @@ Pages.card = (() => {
       UI.$('[data-unpay]', bar).onclick = () => {
         const ids = rows.filter(r => s.sel.has(r.id) && r.paid).map(r => r.id);
         if (!ids.length) { UI.toast('결제완료인 항목을 골라 주세요'); return; }
-        UI.confirm('선택한 결제를 취소할까요?\n같은 결제로 처리된 다른 회차도 함께 미결제가 되고, 그때 통장·장부에 남긴 기록도 지워집니다.', '결제 취소', true).then(ok => {
+        UI.confirm('선택한 결제를 취소할까요?\n같은 결제로 처리된 다른 회차도 함께 미결제가 되고, 그때 통장·가계부에 남긴 기록도 지워집니다.', '결제 취소', true).then(ok => {
           if (!ok) return;
           const n = A.unpayCard(ids);
           s.sel.clear();
@@ -306,12 +314,12 @@ Pages.card = (() => {
     const lid = App.lid;
     const fields = [{ k: 'date', label: '결제일', type: 'date', req: true },
       { k: 'bank', label: '결제 통장 (출금 기록)', type: 'select', options: [['', '(기록 안 함)']].concat(A.accounts('bank').map(a => [String(a.id), `${a.company} ${a.name}`.trim()])) },
-      { k: 'to_ledger', label: `장부(${App.ledgerName()})에 지출로 기록`, type: 'check' }, { k: 'code', label: '장부 계정과목', type: 'code', lid, mode: 'out' }];
+      { k: 'to_ledger', label: `가계부(${App.ledgerName()})에 지출로 기록`, type: 'check' }, { k: 'code', label: '가계부 카테고리', type: 'code', lid, mode: 'out' }];
     UI.formSheet({ title: `결제 처리 — ${rows.length}건 ${UI.money(total)}원`, fields, full: true,
       values: { date: rows[0].pay_date, bank: k.bank_account_id ? String(k.bank_account_id) : '' },
       afterOpen: sb => { const chk = UI.$('[data-k=to_ledger]', sb), box = UI.$('[data-k=code]', sb).closest('.f'); const f = () => box.classList.toggle('hidden', !chk.checked); chk.onchange = f; f(); },
       onSave: v => {
-        if (v.to_ledger && !v.code) throw new Error('장부 계정과목을 고르세요.');
+        if (v.to_ledger && !v.code) throw new Error('가계부 카테고리를 고르세요.');
         const n = A.payCard(rows.map(r => r.id), v.date, v.bank ? Number(v.bank) : null, v.to_ledger ? lid : null, v.to_ledger ? v.code : null);
         s.sel.clear();
         App.dataChanged();

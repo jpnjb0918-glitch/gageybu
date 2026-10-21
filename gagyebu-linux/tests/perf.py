@@ -13,9 +13,9 @@ import time
 T_START = time.perf_counter()
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, ROOT)
-args = [a for a in sys.argv[1:] if not a.startswith('--')]
-N = int(args[0]) if args else 10000
 PROF = sys.argv[sys.argv.index('--profile') + 1] if '--profile' in sys.argv else None
+args = [a for i, a in enumerate(sys.argv[1:], 1) if not a.startswith('--') and sys.argv[i - 1] != '--profile']   # --profile 다음 값은 단계 이름
+N = int(args[0]) if args else 10000
 
 tmp = tempfile.mkdtemp()
 os.environ['XDG_CONFIG_HOME'] = os.path.join(tmp, 'config')

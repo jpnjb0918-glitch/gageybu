@@ -3,17 +3,22 @@ import datetime as dt
 
 from PyQt6.QtCore import QEvent, QPoint, QSize, QStringListModel, Qt
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QCompleter, QDialog, QDialogButtonBox, QFormLayout, QFrame,
-                             QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QScrollArea, QSplitter,
-                             QToolButton, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QCompleter, QDialog, QFormLayout, QFrame,
+                             QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QScrollArea,
+                             QSizePolicy, QSplitter, QToolButton, QVBoxLayout, QWidget)
 
 from .. import db
 from .. import theme as T
 from ..services import ledger as L
 from ..util import fmt_money, month_end
 from ..services import order as O
-from .widgets import (CENTER, CodeCombo, DateEdit, MoneyEdit, MonthNav, ask_order, button, cell, confirm, error,
-                      export_csv, fill, info, make_table, money_cell, print_table, selected_ids, set_tone)
+from .widgets import (CENTER, CodeCombo, DateEdit, MoneyEdit, MonthNav, PayCombo, ask_order, button, cell, confirm,
+                      error, export_csv, fill, info, make_table, money_cell, ok_cancel, print_table, selected_ids,
+                      set_tone)
+from . import money_ui as MU
+from ..services import catemoji as E
+from ..services import money as M
+from ..services import trash as TR
 from . import icons as I
 from . import extras as X
 from ..services import attach as AT
@@ -31,6 +36,7 @@ class EntryForm(QWidget):
         self.income = MoneyEdit()
         self.expense = MoneyEdit()
         self.code = CodeCombo(con)
+        self.pay = PayCombo(con)
         self.memo = QLineEdit()
         self.completer = QCompleter()
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -40,15 +46,17 @@ class EntryForm(QWidget):
         form = QFormLayout(self)
         form.setContentsMargins(0, 0, 0, 0)
         form.addRow('날짜', self.date)
-        form.addRow('품목', self.item)
+        form.addRow('내용', self.item)
         form.addRow('수입 금액', self.income)
         form.addRow('지출 금액', self.expense)
-        form.addRow('계정과목', self.code)
+        form.addRow('카테고리', self.code)
+        form.addRow('결제수단', self.pay)
         form.addRow('메모', self.memo)
 
     def load(self, lid, editing=False):
         self.lid = lid
         self.code.load(lid, keep_unknown=editing)
+        self.pay.load()
         n = int(db.get_meta(self.con, 'item_min_count', 1) or 1)
         self.completer.setModel(QStringListModel([w['name'] for w in L.item_words(self.con, lid, n)]))
 
@@ -61,7 +69,8 @@ class EntryForm(QWidget):
 
     def value(self):
         return {'date': self.date.date_(), 'item': self.item.text().strip(), 'income': self.income.value(),
-                'expense': self.expense.value(), 'code': self.code.code(), 'memo': self.memo.text().strip()}
+                'expense': self.expense.value(), 'code': self.code.code(), 'memo': self.memo.text().strip(),
+                'pay': self.pay.pay()}
 
     def set_value(self, e):
         self.date.set_date(e['date'])
@@ -69,6 +78,7 @@ class EntryForm(QWidget):
         self.income.set_value(e['income'])
         self.expense.set_value(e['expense'])
         self.code.set_code(e['code'], keep_unknown=True)
+        self.pay.set_pay(_get(e, 'pay'))
         self.memo.setText(e['memo'] or '')
 
     def clear(self, keep_date=True):
@@ -85,7 +95,7 @@ class EntryForm(QWidget):
             error(parent, '금액은 숫자로 입력하세요.')
             return None
         if not v['item']:
-            error(parent, '품목을 입력하세요.')
+            error(parent, '내용을 입력하세요.')
             self.item.setFocus()
             return None
         if not v['income'] and not v['expense']:
@@ -93,7 +103,7 @@ class EntryForm(QWidget):
             self.expense.setFocus()
             return None
         if not v['code']:
-            error(parent, '계정과목을 선택하세요. (설정 → 계정과목에서 만들 수 있습니다)')
+            error(parent, '카테고리를 선택하세요. (설정 → 카테고리에서 만들 수 있습니다)')
             return None
         return v
 
@@ -105,9 +115,7 @@ class EntryDialog(QDialog):
         self.form = EntryForm(con)
         self.form.load(lid)
         self.form.set_value(entry)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        bb.accepted.connect(self._ok)
-        bb.rejected.connect(self.reject)
+        bb = ok_cancel(self, '저장', self._ok)
         lay = QVBoxLayout(self)
         lay.addWidget(self.form)
         lay.addWidget(bb)
@@ -130,10 +138,10 @@ class LedgerPage(QWidget):
         self.nav.changed.connect(lambda *_: self.refresh())
         self.all_chk = QCheckBox('전체 기간')
         self.all_chk.toggled.connect(lambda *_: self.refresh())
-        self.desc_chk = QCheckBox('최근 것을 위로')
+        self.desc_chk = QCheckBox('최신순')
         self.desc_chk.setChecked(True)
         self.desc_chk.toggled.connect(lambda *_: self.refresh())
-        self.table = make_table(['날짜', '품목', '수입', '지출', '잔액', '계정과목', '메모'], stretch=6, multi=True)
+        self.table = make_table(['날짜', '내용', '수입', '지출', '잔액', '카테고리', '메모', '결제'], stretch=6, multi=True)
         self.table.itemSelectionChanged.connect(self._selected)
         self.table.doubleClicked.connect(lambda *_: self.form.item.setFocus())
         self.sns_delegate = LedgerDelegate(self.table)      # 피드·타임라인 테마일 때만 씀
@@ -144,7 +152,7 @@ class LedgerPage(QWidget):
         self.form = EntryForm(self.con)
         self.save_btn = button('저장 (F5)', self.save)
         self.save_btn.setDefault(True)
-        self.new_btn = button('새로 입력', self.new)
+        self.new_btn = button('새 내역', self.new)
         self.del_btn = button('삭제', self.delete)
         self.pending_photos = []                  # 새 내역에 붙일 사진 (저장할 때 함께)
         self.sms_btn = button('문자 붙여넣기', self.paste_sms, '카드·은행 알림 문자를 붙여넣으면 날짜·금액·가게를 읽어 내역으로 넣습니다')
@@ -153,18 +161,28 @@ class LedgerPage(QWidget):
         self.fav_menu.aboutToShow.connect(self._fill_fav_menu)
         self.fav_btn.setMenu(self.fav_menu)
         self.photo_btn = button('사진', self.photos, '영수증 사진을 이 내역에 붙입니다 (자료 파일에 함께 저장)')
+        self.fx_btn = button('외화', self.foreign, '여행에서 쓴 외화 금액과 환율로 원 금액을 넣습니다')
+        self.split_btn = button('나눠 적기', self.split_entry, '1년치 보험료처럼 큰돈을 여러 달로 나눠 적습니다')
         self.mode_lbl = set_tone(QLabel('새 내역 입력'), 'note')
         self.mode_lbl.setWordWrap(True)           # 긴 품목 이름이 입력 칸을 넓혀 화면 밖으로 밀지 않게
+        self.same_btn = button('', self.same_place, '같은 내용의 최근 3개월 내역과 합계')
+        self.same_btn.setFlat(True)
+        self.same_btn.setStyleSheet('text-align:left; padding:1px 2px; text-decoration: underline')
+        self.same_btn.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)   # 긴 내용이라도 옆 칸을 넓히지 않게
+        self.same_btn.hide()
         box = QGroupBox('입력하기')
         self.box = box
         bl = QVBoxLayout(box)
         bl.addWidget(self.mode_lbl)
+        bl.addWidget(self.same_btn)
         bl.addWidget(self.form)
-        tools = QGridLayout()                    # 두 줄: 좁은 입력 상자(미니홈피 도트 글꼴)에서도 화면 밖으로 밀리지 않게
+        tools = QGridLayout()                    # 여러 줄: 좁은 입력 상자(미니홈피 도트 글꼴)에서도 화면 밖으로 밀리지 않게
         tools.setContentsMargins(0, 0, 0, 0)
         tools.addWidget(self.sms_btn, 0, 0)
         tools.addWidget(self.photo_btn, 0, 1)
-        tools.addWidget(self.fav_btn, 1, 0, 1, 2)
+        tools.addWidget(self.fx_btn, 1, 0)
+        tools.addWidget(self.split_btn, 1, 1)
+        tools.addWidget(self.fav_btn, 2, 0, 1, 2)
         bl.addLayout(tools)
         row = QHBoxLayout()
         row.addWidget(self.save_btn)
@@ -172,8 +190,8 @@ class LedgerPage(QWidget):
         row.addWidget(self.del_btn)
         bl.addLayout(row)
         bl.addStretch(1)
-        tips = QLabel('· 품목을 예전과 같게 쓰면 계정이 자동 선택됩니다\n· 금액 칸에 12000+3500 처럼 계산식도 됩니다\n'
-                      '· 메모에 #여행 처럼 쓰면 결산 보고서 › 태그에서 모아 봅니다\n'
+        tips = QLabel('· 내용을 예전과 같게 쓰면 카테고리가 자동 선택됩니다\n· 금액 칸에 12000+3500 처럼 계산식도 됩니다\n'
+                      '· 메모에 #여행 처럼 쓰면 통계 › 태그에서 모아 봅니다\n'
                       '· Enter=다음 칸, F5=저장, Delete=고른 내역 삭제 (여러 줄 가능)')
         set_tone(tips, 'note')
         tips.setWordWrap(True)
@@ -183,6 +201,7 @@ class LedgerPage(QWidget):
         self.month_lbl.setWordWrap(True)          # 금액이 길어도 화면 폭을 넓히지 않고 줄바꿈
         self.bal_lbl = QLabel()
         self.bal_lbl.setStyleSheet('font-weight:bold')
+        self.trash_btn = button('휴지통', self.open_trash, f'지운 내역을 {TR.KEEP_DAYS}일 동안 보관했다가 되살립니다')
         left = QWidget()
         self.left_lay = ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
@@ -196,6 +215,7 @@ class LedgerPage(QWidget):
         bot.setContentsMargins(0, 0, 0, 0)
         bot.addWidget(self.month_lbl, 1)
         bot.addWidget(self.bal_lbl, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        bot.addWidget(self.trash_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
         self.parts = {'nav': top_row, 'table': self.table, 'summary': bottom}
 
         # ── 피드·타임라인: 가운데 칸 (위 덩어리 + 표가 같이 스크롤) + 오른쪽 칸 ──
@@ -212,7 +232,7 @@ class LedgerPage(QWidget):
         self.sns_trends.hide()
         self.sns_tools = []
         for ic, tip, fn in (('sort', '같은 날 순서 바꾸기 (고른 내역이 있는 날)', self.day_order), ('download', 'CSV로 저장', self.csv_btn.click),
-                            ('print', '인쇄', self.print_btn.click)):
+                            ('print', '인쇄', self.print_btn.click), ('trash', '휴지통 (지운 내역 되살리기)', self.open_trash)):
             tb = QToolButton()
             tb.setObjectName('SnsTool')
             tb.setToolTip(tip)
@@ -373,11 +393,16 @@ class LedgerPage(QWidget):
         if self.desc_chk.isChecked():           # 최근 날짜 위로 (같은 날 순서를 정한 날은 그 순서 그대로)
             rows = O.apply_day_order(rows, O.day_orders(self.con, lid), desc=True)
         cmap = L.category_map(self.con, lid)
+        emap = E.emoji_map(self.con, lid)
+        pmap = M.pay_map(self.con)
         self.table.setRowCount(0)               # 줄 높이를 처음 상태로 (테마를 바꿨을 때)
         fill(self.table, [[cell(r['date'], CENTER, data=r['id']), cell(r['item']),
                            money_cell(r['income'], 'in'), money_cell(r['expense'], 'out'),
-                           money_cell(bal, blank_zero=False), cell(L.code_label(cmap, r['code'])), cell(r['memo'])]
+                           money_cell(bal, blank_zero=False), cell(MU.cat_label(emap, cmap, r['code'])), cell(r['memo']),
+                           cell(M.pay_label(pmap, r['pay']))]
                           for r, bal in rows])
+        n_trash = TR.count(self.con, lid)
+        self.trash_btn.setText(f'휴지통 {n_trash}' if n_trash else '휴지통')
         self.photo_counts = AT.counts(self.con, [r['id'] for r, _b in rows])
         if self.photo_counts:                   # 사진 붙은 내역: 품목 칸에 사진기 표시
             ic = X.camera_icon()
@@ -394,7 +419,7 @@ class LedgerPage(QWidget):
         inc, exp = L.totals(self.con, lid, s, e)
         bal = L.current_balance(self.con, lid, dt.date.today())
         self._apply_layout(T.current()[0], rows, cmap, end_bal, (inc, exp, bal))
-        self.month_lbl.setText(f'이달의 현황 ({y}년 {m}월)   수입: {fmt_money(inc)}   지출: {fmt_money(exp)}   '
+        self.month_lbl.setText(f'이번 달 요약 ({y}년 {m}월)   수입: {fmt_money(inc)}   지출: {fmt_money(exp)}   '
                                f'차액: {fmt_money(inc - exp)}')
         self.bal_lbl.setText(f'현재 잔액(오늘까지): {fmt_money(bal)}원')
         if self.editing and not L.get_entry(self.con, self.editing):
@@ -448,15 +473,16 @@ class LedgerPage(QWidget):
                 v[0] += r['expense']
                 v[1] += 1
         top = sorted(by.items(), key=lambda kv: -kv[1][0])
-        self.sns_hl.set_items([(k, L.code_label(cmap, k), v[0]) for k, v in top[:14]])
+        emap = E.emoji_map(self.con, self.app.lid)
+        self.sns_hl.set_items([(k, MU.cat_label(emap, cmap, k), v[0]) for k, v in top[:14]])
         period = '전체 기간' if self.all_chk.isChecked() else f'{m}월'
-        self.sns_trends.set_items([(k, L.code_label(cmap, k), v[0], v[1]) for k, v in top[:4]], f'{period}에 많이 쓴 곳')
+        self.sns_trends.set_items([(k, MU.cat_label(emap, cmap, k), v[0], v[1]) for k, v in top[:4]], f'{period}에 많이 쓴 곳')
         self.sns_trends.setVisible(T.layout_of(theme) == 'timeline' and bool(top) and 'stories' in T.ledger_layout())
         desc = self.desc_chk.isChecked()
         al = self.all_chk.isChecked()
         if T.layout_of(theme) == 'feed':
             self.sns_tabs.set_tabs([('month', 'grid', f'{m}월', not al, True), ('all', 'all', '전체 기간', al, True),
-                                    ('desc', 'sort', '최근 것 위로' if desc else '오래된 것 위로', False, True)], 'feed')
+                                    ('desc', 'sort', '최신순' if desc else '오래된순', False, True)], 'feed')
         else:
             self.sns_tabs.set_tabs([('month', None, f'{m}월', not al, True), ('all', None, '전체 기간', al, True),
                                     ('desc', 'sort', '', desc, False)], 'timeline')
@@ -570,7 +596,7 @@ class LedgerPage(QWidget):
             info(self, f'{d} 에는 내역이 하나뿐입니다.')
             return
         cmap = L.category_map(self.con, lid)
-        items = [(r['id'], r['item'] or '(품목 없음)',
+        items = [(r['id'], r['item'] or '(내용 없음)',
                   ' · '.join(x for x in (L.code_label(cmap, r['code']), f"+{fmt_money(r['income'])}" if r['income'] else '',
                                          f"-{fmt_money(r['expense'])}" if r['expense'] else '') if x)) for r in rows]
         what, keys = ask_order(self, f'{d} 내역 순서', items, '같은 날 안에서의 순서입니다. 잔액도 이 순서로 계산되고, '
@@ -594,6 +620,7 @@ class LedgerPage(QWidget):
                 set_tone(self.mode_lbl, 'warn')
                 self.save_btn.setText('수정 (F5)')      # 글자 폭을 '저장 (F5)' 와 같게 (입력 칸이 넓어져 화면 밖으로 밀리지 않게)
                 self._photo_label()
+                self._same_label(e['item'])
                 # 가운데 칸이 통째로 스크롤되므로 고른 줄이 보이게. 화면 모양을 바꾸는 중(표를 옮기는 중)에는 건너뜀 —
                 # 표가 가운데 칸 안에 없을 때 위치를 바꿔 계산하면 Qt 가 죽음
                 if self._sns() and self.sns_inner.isAncestorOf(self.table):
@@ -611,6 +638,7 @@ class LedgerPage(QWidget):
         set_tone(self.mode_lbl, 'note')
         self.save_btn.setText('저장 (F5)')
         self._photo_label()
+        self.same_btn.hide()
         self.form.item.setFocus()
 
     def _photo_label(self):
@@ -671,6 +699,7 @@ class LedgerPage(QWidget):
         self.form.expense.set_value(f['expense'])
         if f['code']:
             self.form.code.set_code(f['code'])
+        self.form.pay.set_pay(_get(f, 'pay'))
         self.form.memo.setText(f['memo'] or '')
         self.mode_lbl.setText(f"자주 쓰는 내역 '{f['item']}' — 날짜·금액을 확인하고 저장하세요")
         (self.form.expense if f['expense'] or not f['income'] else self.form.income).setFocus()
@@ -682,7 +711,7 @@ class LedgerPage(QWidget):
             error(self, '금액은 숫자로 입력하세요.')
             return
         if not v['item']:
-            error(self, '먼저 품목(과 금액·계정)을 입력한 뒤 넣으세요.')
+            error(self, '먼저 내용과 금액·카테고리를 입력한 뒤 넣으세요.')
             self.form.item.setFocus()
             return
         L.save_favorite(self.con, self.app.lid, v)
@@ -700,6 +729,7 @@ class LedgerPage(QWidget):
             if not e or e['ledger_id'] != self.app.lid:
                 self.editing = None
         before = X.spent_before(self.con, self.app.lid, v['code'], v['date'])
+        before_m = X.month_before(self.con, self.app.lid, v['date'])
         if self.editing:
             L.update_entry(self.con, self.editing, v)
         else:
@@ -710,19 +740,93 @@ class LedgerPage(QWidget):
                 self.con.commit()
             if not self.all_chk.isChecked() and (v['date'].year, v['date'].month) != (self.nav.y, self.nav.m):
                 self.nav.set(v['date'].year, v['date'].month)
-        alert = X.alert_after(self.con, self.app.lid, v['code'], v['date'], before)
+        alerts = [a for a in (X.alert_after(self.con, self.app.lid, v['code'], v['date'], before),
+                              X.total_alert_after(self.con, self.app.lid, v['date'], before_m)) if a]
         self.app.data_changed()
         self.new()
-        self._show_alerts([alert] if alert else [])
+        self._show_alerts(alerts)
 
     def delete(self):
         ids = selected_ids(self.table)
         if not ids:
             return
-        if confirm(self, f'선택한 내역 {len(ids)}건을 삭제할까요?'):
-            L.delete_entries(self.con, ids)
+        extra = []                                 # 나눠 적은 내역: 함께 나눠 적은 나머지도 지울지
+        for i in ids:
+            extra += [x for x in M.split_group(self.con, i) if x not in ids and x not in extra]
+        if extra:
+            from PyQt6.QtWidgets import QMessageBox
+            box = QMessageBox(QMessageBox.Icon.Question, '나눠 적은 내역', f'나눠 적은 내역입니다. 함께 나눠 적은 {len(extra)}건도 지울까요?',
+                              parent=self)
+            b_all = box.addButton(f'모두 지우기 ({len(ids) + len(extra)}건)', QMessageBox.ButtonRole.YesRole)
+            b_one = box.addButton(f'고른 것만 ({len(ids)}건)', QMessageBox.ButtonRole.NoRole)
+            box.addButton('취소', QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            if box.clickedButton() is b_all:
+                ids = ids + extra
+            elif box.clickedButton() is not b_one:
+                return
+        elif not confirm(self, f'선택한 내역 {len(ids)}건을 삭제할까요?\n(휴지통에 {TR.KEEP_DAYS}일 동안 보관됩니다)'):
+            return
+        L.delete_entries(self.con, ids)
+        self.app.data_changed()
+        self.new()
+        self.app.statusBar().showMessage(f'{len(ids)}건을 휴지통으로 옮겼어요 — [휴지통]에서 {TR.KEEP_DAYS}일 안에 되살릴 수 있어요', 10000)
+
+    def open_trash(self):
+        d = MU.TrashDialog(self, self.con, self.app.lid)
+        d.exec()
+        self.app.data_changed()
+
+    def _same_label(self, item):
+        sp = M.same_place(self.con, self.app.lid, item, dt.date.today()) if item else None
+        if sp and sp['count']:
+            amt = f"{fmt_money(sp['expense'])}원" if sp['expense'] or not sp['income'] else f"수입 {fmt_money(sp['income'])}원"
+            short = item if len(item) <= 12 else item[:11] + '…'
+            self.same_btn.setText(f"'{short}' 최근 3개월 {sp['count']}건 · {amt} ›")
+            self.same_btn.setToolTip(f"'{item}' 의 최근 3개월 내역과 합계")
+            self.same_btn.show()
+        else:
+            self.same_btn.hide()
+
+    def same_place(self):
+        item = self.form.item.text().strip()
+        if item:
+            MU.SamePlaceDialog(self, self.con, self.app.lid, item).exec()
+
+    def foreign(self):
+        try:
+            v = self.form.value()
+        except ValueError:
+            v = {'income': 0, 'expense': 0}
+        d = MU.FxDialog(self, self.con, expense=not (v['income'] and not v['expense']))
+        if not d.exec():
+            return
+        (self.form.expense if d.expense else self.form.income).set_value(d.won)
+        (self.form.income if d.expense else self.form.expense).set_value(0)
+        memo = self.form.memo.text().strip()
+        self.form.memo.setText(f'{memo} · {d.note}' if memo else d.note)
+
+    def split_entry(self):
+        if self.editing:
+            info(self, '나눠 적기는 새 내역에서 씁니다. [새 내역]을 누른 뒤 전체 금액을 넣고 다시 누르세요.')
+            return
+        v = self.form.validate(self)
+        if not v:
+            return
+        d = MU.SplitDialog(self, self.con, self.app.lid, v)
+        if d.exec() and d.ids:
             self.app.data_changed()
             self.new()
+            self._show_alerts([], f'{len(d.ids)}달로 나눠 넣었어요.')
+
+
+def _get(row, key, default=''):
+    """sqlite Row·dict 어느 쪽이든 (예전 자료에 없는 칸이면 default)"""
+    try:
+        v = row[key]
+    except (KeyError, IndexError):
+        return default
+    return default if v is None else v
 
 
 class _SideScroll(QScrollArea):

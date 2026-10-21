@@ -3,20 +3,26 @@
 Pages.report = (() => {
   const t = U.parts(U.today());
   const s = { kind: 'monthly', y: t[0], m: t[1], start: U.iso(t[0], t[1], 1), end: U.today(), tagAll: true };
-  const KINDS = [['monthly', '월결산'], ['yearly', '년결산'], ['daily', '일일'], ['custom', '기간'], ['budget', '예산'], ['insight', '리포트'], ['tags', '태그']];
+  const KINDS = [['monthly', '월별'], ['yearly', '연간'], ['daily', '일별'], ['weekly', '주별'], ['custom', '기간'],
+    ['budget', '예산'], ['savings', '저축'], ['pay', '결제수단'], ['insight', '리포트'], ['tags', '태그']];
 
   function render(c, p, tools) {
     const lid = App.lid;
     const sd = Rep.settleDay();
-    const sdBtn = UI.el(`<button class="btn sm">결산일 ${sd}일</button>`);
-    sdBtn.onclick = () => UI.formSheet({ title: '결산일', fields: [{ k: 'sd', label: '결산일 (1~31)', type: 'int', hint: '5일이면 5일~다음달 4일을 한 달로 셉니다 (월급날 기준 등)' }],
-      values: { sd }, onSave: v => { if (!v.sd || v.sd < 1 || v.sd > 31) throw new Error('1~31 사이로 입력하세요.'); DB.setMeta('settle_day', v.sd); App.dataChanged(); } });
+    const sdBtn = UI.el(`<button class="btn sm">월 시작일 ${sd}일</button>`);
+    sdBtn.onclick = () => Pages.settings.settleSheet();
     tools.appendChild(sdBtn);
-    c.appendChild(UI.seg(KINDS, s.kind, k => {
+    const segEl = UI.seg(KINDS, s.kind, k => {
       if (k === 'insight' && s.kind !== 'insight') [s.y, s.m] = Ins.periodOf(U.today(), sd);    // 처음엔 오늘이 든 달 (결산일 기준)
       s.kind = k;
       App.render();
-    }));
+    });
+    segEl.classList.add('rows');                     // 10개라 두 줄 (5개씩)
+    c.appendChild(segEl);
+    const again = () => App.render(true);
+    if (s.kind === 'weekly') { Money.weekView(c, s, again); return; }       // 1.8.0
+    if (s.kind === 'pay') { Money.payView(c, s, again); return; }
+    if (s.kind === 'savings') { Money.savingsView(c, s, again); return; }
     if (s.kind === 'insight') {
       c.appendChild(UI.monthNav(s.y, s.m, (y, m) => { s.y = y; s.m = m; App.render(true); }));
       c.appendChild(UI.el(Extra.insightHtml(lid, s.y, s.m)));
@@ -52,7 +58,7 @@ Pages.report = (() => {
   }
   /** 결산 표: 대분류 이름 줄 → 계정 줄(줄무늬) → 소계 줄(굵은 선으로 끝) … → 합계 줄들. 계정 줄의 0 은 비우고, 소계·합계의 0 은 흐리게 */
   function table(rep) {
-    let html = `<table class="rep"><tr><th>계정과목</th>${rep.columns.map(cn => `<th>${U.esc(cn)}</th>`).join('')}</tr>`;
+    let html = `<table class="rep"><tr><th>카테고리</th>${rep.columns.map(cn => `<th>${U.esc(cn)}</th>`).join('')}</tr>`;
     let lastGroup = null, n = 0, prev = null;
     rep.rows.forEach((r, ri) => {
       if (r.kind === 'cat' && r.group !== lastGroup) {
@@ -62,7 +68,7 @@ Pages.report = (() => {
       }
       const cls = r.kind === 'subtotal' ? 'sub' : r.kind === 'footer' ? (prev === 'footer' ? 'foot' : 'foot f1') : (n++ % 2 ? 'z' : '');
       prev = r.kind;
-      const label = r.kind === 'cat' ? `${U.esc(r.code)} ${U.esc(r.label)}` : U.esc(r.kind === 'subtotal' ? `${r.group} 소계` : r.label);
+      const label = r.kind === 'cat' ? `${U.esc(r.code)} ${U.esc(Emo.deco(Money.ctx().emap, r.code, r.label))}` : U.esc(r.kind === 'subtotal' ? `${r.group} 소계` : r.label);
       html += `<tr class="${cls}"><td>${label}</td>${r.values.map((v, ci) => {
         const tap = r.kind === 'cat' && (budgetYm(rep, ci) || rep.periods[ci]);
         const k = [v < 0 ? 'neg' : '', v === 0 && r.kind !== 'cat' ? 'z0' : '', tap ? 'tap' : ''].filter(Boolean).join(' ');
@@ -83,15 +89,11 @@ Pages.report = (() => {
     }
     const per = rep.periods[ci];
     if (!per) return;
-    const rows = L.search(lid, { start: per[0], end: per[1], codes: [r.code] });
-    const cmap = L.categoryMap(lid);
-    const sh = UI.sheet({ title: `${r.label} (${per[0]} ~ ${per[1]})`, full: true,
-      body: rows.length ? `<ul class="list">${rows.map(x => Entry.rowHtml(x, null, true, cmap)).join('')}</ul>` : UI.empty('내역이 없어요') });
-    UI.on(sh.body, 'li[data-id]', 'click', (e, li) => { sh.close(); Entry.open({ entry: rows.find(x => x.id === Number(li.dataset.id)) }); });
+    Entry.listSheet(`${r.label} (${per[0]} ~ ${per[1]})`, L.search(lid, { start: per[0], end: per[1], codes: [r.code] }));
   }
   /** 이달 리포트로 바로 (가계부 화면의 예산 막대에서) */
   function openInsight(y, m) { s.kind = 'insight'; s.y = y; s.m = m; App.go('report', {}, true); }
-  return { title: '결산 보고서', sticker: 'b30', sub: '한 달 성적표 두근두근', render, openInsight };
+  return { title: '통계', sticker: 'b30', sub: '한 달 성적표 두근두근', render, openInsight };
 })();
 
 // ════════ 그래프 ════════
@@ -123,8 +125,8 @@ Pages.graph = (() => {
     const gs = L.groups(lid), cats = L.categories(lid);
     const ctl = UI.el(`<div class="row" style="margin-bottom:8px">
       <select class="inp grow" data-k="month"><option value="0">월별 (1~12월)</option>${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}"${s.month === i + 1 ? ' selected' : ''}>${i + 1}월 일별</option>`).join('')}</select>
-      <select class="inp grow" data-k="sel"><option value="">대분류 전체</option>
-        ${gs.map(g => `<option value="g:${U.esc(g.code)}"${s.sel === 'g:' + g.code ? ' selected' : ''}>(${U.esc(g.code)}) ${U.esc(g.name)} 소분류별</option>`).join('')}
+      <select class="inp grow" data-k="sel"><option value="">카테고리 전체</option>
+        ${gs.map(g => `<option value="g:${U.esc(g.code)}"${s.sel === 'g:' + g.code ? ' selected' : ''}>(${U.esc(g.code)}) ${U.esc(g.name)} 세부 카테고리별</option>`).join('')}
         ${cats.map(x => `<option value="c:${U.esc(x.code)}"${s.sel === 'c:' + x.code ? ' selected' : ''}>${U.esc(x.code)} ${U.esc(x.name)}</option>`).join('')}</select></div>`);
     UI.$('[data-k=month]', ctl).value = String(s.month);
     UI.on(ctl, 'select', 'change', (e, x) => { s[x.dataset.k] = x.dataset.k === 'month' ? Number(x.value) : x.value; App.render(true); });

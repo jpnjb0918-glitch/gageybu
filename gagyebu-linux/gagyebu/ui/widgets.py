@@ -121,15 +121,17 @@ class CodeCombo(QComboBox):
         if self.allow_empty:
             self.addItem('(선택 안 함)', '')
         gmap = L.group_map(self.con, lid)
+        from ..services import catemoji as E
+        emap = E.emoji_map(self.con, lid)               # 카테고리 그림 (1.8.0)
         last_g = None
         for c in L.categories(self.con, lid):
             g = c['code'][:1]
             if g != last_g:
-                self.addItem(f'── {g} {gmap.get(g, "")} ──', None)
+                self.addItem(f'── {g} {E.deco(emap, g, gmap.get(g, ""))} ──', None)
                 idx = self.count() - 1
                 self.model().item(idx).setEnabled(False)
                 last_g = g
-            self.addItem(f"{c['code']}  {c['name']}", c['code'])
+            self.addItem(f"{c['code']}  {E.deco(emap, c['code'], c['name'])}", c['code'])
         self.blockSignals(False)
         self.set_code(cur, keep_unknown=keep_unknown and bool(cur))
 
@@ -140,12 +142,44 @@ class CodeCombo(QComboBox):
         """keep_unknown=True(기존 내역 수정): 계정 목록에 없는 코드도 바꾸지 않고 '(미분류)'로 그대로 유지."""
         i = self.findData(code) if code else -1
         if i < 0 and keep_unknown:
-            self.addItem(f'{code}  (미분류 — 계정 없음)' if code else '(계정 없음 — 골라 주세요)', code or None)
+            self.addItem(f'{code}  (미분류 — 카테고리 없음)' if code else '(카테고리 없음 — 골라 주세요)', code or None)
             i = self.count() - 1
         if i < 0:
             first = next((k for k in range(self.count()) if self.itemData(k)), 0)
             i = first if not self.allow_empty else 0
         self.setCurrentIndex(i)
+
+
+class PayCombo(QComboBox):
+    """결제수단 고르기 (1.8.0): (안 정함) · 현금 · 카드 · 계좌이체 · 간편결제 · 자산에 넣은 카드 · 직접 만든 것"""
+    def __init__(self, con, parent=None, none_text='(안 정함)'):
+        super().__init__(parent)
+        self.con = con
+        self.none_text = none_text
+        self.setMaxVisibleItems(20)
+        self.setMinimumContentsLength(10)
+
+    def load(self):
+        from ..services import money as M
+        cur = self.pay()
+        self.blockSignals(True)
+        self.clear()
+        self.addItem(self.none_text, '')
+        for v, n in M.pay_options(self.con):
+            self.addItem(('💳 ' if v.startswith('card:') else '') + n, v)
+        self.blockSignals(False)
+        self.set_pay(cur)
+
+    def pay(self):
+        return self.currentData() or ''
+
+    def set_pay(self, v):
+        from ..services import money as M
+        i = self.findData(v or '')
+        if i < 0 and v:
+            self.addItem(M.pay_label(M.pay_map(self.con), v), v)
+            i = self.count() - 1
+        self.setCurrentIndex(max(i, 0))
 
 
 def h(*widgets, stretch_last=False):
@@ -293,6 +327,12 @@ def selected_ids(table, col=0):
     return out
 
 
+def selected_id(table, col=0):
+    """고른 첫 줄의 번호 (없으면 None)"""
+    ids = selected_ids(table, col)
+    return ids[0] if ids else None
+
+
 def table_rows(table):
     head = [table.horizontalHeaderItem(c).text().replace('\n', ' ') if table.horizontalHeaderItem(c) else ''
             for c in range(table.columnCount())]
@@ -345,6 +385,16 @@ def print_table(parent, table, title, note=''):
     dlg.paintRequested.connect(doc.print)
     dlg.resize(1000, 800)
     dlg.exec()
+
+
+def ok_cancel(dlg, ok_text='확인', on_ok=None):
+    """창 아래 [ok_text] [취소] 단추 줄. 단추 글은 늘 한국어 (Qt 번역 파일이 없어도). on_ok 를 안 주면 dlg.accept"""
+    bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    bb.button(QDialogButtonBox.StandardButton.Ok).setText(ok_text)
+    bb.button(QDialogButtonBox.StandardButton.Cancel).setText('취소')
+    bb.accepted.connect(on_ok or dlg.accept)
+    bb.rejected.connect(dlg.reject)
+    return bb
 
 
 # ── 메시지 ─────────────────────────────────────────────
@@ -422,11 +472,7 @@ class FormDialog(QDialog):
                     w.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
             self.w[key] = w
             form.addRow(label + (' *' if kind == 'text*' else ''), w)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        bb.button(QDialogButtonBox.StandardButton.Ok).setText('저장')
-        bb.button(QDialogButtonBox.StandardButton.Cancel).setText('취소')
-        bb.accepted.connect(self._ok)
-        bb.rejected.connect(self.reject)
+        bb = ok_cancel(self, '저장', self._ok)
         lay = QVBoxLayout(self)
         lay.addLayout(form)
         lay.addWidget(bb)
@@ -475,9 +521,9 @@ class CodePicker(QDialog):
     """대분류를 체크하면 소분류 전체 선택 (원본 '계정코드 선택하기')."""
     def __init__(self, parent, con, lid, selected=()):
         super().__init__(parent)
-        self.setWindowTitle('계정코드 선택')
+        self.setWindowTitle('카테고리 선택')
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(['계정'])
+        self.tree.setHeaderLabels(['카테고리'])
         gmap = L.group_map(con, lid)
         nodes = {}
         for g in L.groups(con, lid):
@@ -498,9 +544,7 @@ class CodePicker(QDialog):
             it.setCheckState(0, Qt.CheckState.Checked if c['code'] in selected else Qt.CheckState.Unchecked)
             parent_node.addChild(it)
         self.tree.expandAll()
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        bb.accepted.connect(self.accept)
-        bb.rejected.connect(self.reject)
+        bb = ok_cancel(self)
         clear = button('다시 설정', lambda: [self._set_all(Qt.CheckState.Unchecked)])
         lay = QVBoxLayout(self)
         lay.addWidget(self.tree)

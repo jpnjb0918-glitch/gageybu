@@ -20,6 +20,17 @@ C_DATE, C_ITEM, C_IN, C_OUT, C_BAL, C_CODE, C_MEMO = range(7)
 WEEK = '월화수목금토일'
 POST_W = 560          # 피드 게시물 폭 (가운데 정렬)
 TW_W = 640            # 타임라인 글 칸 폭
+
+
+def center_col(width, feed, left=0.0):
+    """피드·타임라인 가운데 칸 (x, 폭) — 내역 목록·탭이 같이 씀"""
+    w = min(POST_W if feed else TW_W, width - (24 if feed else 0))
+    return left + max(0.0, (width - w) / 2), w
+
+
+def feed_left(width):
+    """피드 위 덩어리(프로필·동그라미)의 왼쪽 끝"""
+    return max(16.0, (width - POST_W - 60) / 2)
 TILE_H = 230          # 피드 사진 칸 높이
 # 사진 칸 색 (미니홈피 청록·분홍·하늘·노랑·보라) — 안드로이드판 .ptile.t0~t4
 TILES = (('#347C7C', '#FFFFFF'), ('#F06C96', '#FFFFFF'), ('#2FB3B3', '#FFFFFF'), ('#FFD84D', '#1A1A1A'), ('#8E7CE8', '#FFFFFF'))
@@ -180,8 +191,7 @@ class LedgerDelegate(QStyledItemDelegate):
 
     def _col(self, rect):
         """가운데 칸 (x, 폭)"""
-        w = min(POST_W if self.feed else TW_W, rect.width() - (24 if self.feed else 0))
-        return rect.left() + max(0.0, (rect.width() - w) / 2), w
+        return center_col(rect.width(), self.feed, rect.left())
 
     def _fonts(self):
         base = QFont(self.table.font())
@@ -318,7 +328,7 @@ class LedgerDelegate(QStyledItemDelegate):
             p.setPen(QColor(c[k]))
             p.drawText(QRectF(ax, line.top(), fmb.horizontalAdvance(t) + 2, line.height()), Qt.AlignmentFlag.AlignVCenter, t)
             ax += fmb.horizontalAdvance(t) + 8
-        item = self._text(row, C_ITEM) or '(품목 없음)'
+        item = self._text(row, C_ITEM) or '(내용 없음)'
         avail = line.width() - 18 - aw
         iw = min(fmb.horizontalAdvance(item), avail * 0.72)
         p.setPen(QColor(c['ink']))
@@ -382,7 +392,7 @@ class LedgerDelegate(QStyledItemDelegate):
         cap_f.setPixelSize(12)
         p.setFont(cap_f)
         fmc = QFontMetrics(cap_f)
-        first = day.get('first') or '(품목 없음)'
+        first = day.get('first') or '(내용 없음)'
         cap = f'{first} 외 {n - 1}건' if n > 1 else first
         cw = min(fmc.horizontalAdvance(cap) + 24, tx.width())
         pill = QRectF(tx.center().x() - cw / 2, cy + fmb.height() / 2 + 6, cw, fmc.height() + 8)
@@ -456,7 +466,7 @@ class LedgerDelegate(QStyledItemDelegate):
         yy = y + 11
         # 1줄: 품목 @계정 · 날짜
         fmb = QFontMetrics(fb)
-        item = self._text(row, C_ITEM) or '(품목 없음)'
+        item = self._text(row, C_ITEM) or '(내용 없음)'
         iw = min(fmb.horizontalAdvance(item), cw * 0.62)
         p.setFont(fb)
         p.setPen(QColor(c['ink']))
@@ -551,7 +561,7 @@ class ProfileHeader(_Painted):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(), QColor(c['page']))
-        x0 = max(16.0, (self.width() - POST_W - 60) / 2)
+        x0 = feed_left(self.width())
         av = QRectF(x0 + 8, 22, 118, 118)
         draw_minimi(p, av, d.get('minimi', T.DEFAULT_MINIMI))
         self.hits = [(av, 'avatar', None)]
@@ -708,7 +718,7 @@ class Highlights(_Painted):
         fsb = _font(base, 0.82, True)
         fm, fmb = QFontMetrics(fs), QFontMetrics(fsb)
         slot = self.SIZE + 24
-        x0 = max(16.0, (self.width() - POST_W - 60) / 2)
+        x0 = feed_left(self.width())
         x, y = x0, 10
         self.hits = []
         # ＋ 새 내역
@@ -817,8 +827,7 @@ class SnsTabs(_Painted):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(), QColor(c['page']))
         feed = self.kind == 'feed'
-        w = min(POST_W if feed else TW_W, self.width() - (24 if feed else 0))
-        x0 = (self.width() - w) / 2
+        x0, w = center_col(self.width(), feed)
         base = QFont(self.font())
         p.setPen(QPen(QColor(c['line']), 1))
         if feed:

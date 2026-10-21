@@ -91,11 +91,12 @@ body.basic .banner img { display: none; }
 
 .navbar { flex: 0 0 var(--nav-h); display: flex; background: var(--surface); border-top: 2px solid var(--ink); }
 .navbar button { flex: 1; border: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px; font-size: 11px; color: var(--muted); padding: 4px 0; }
+  gap: 2px; font-size: 11px; color: var(--muted); padding: 4px 2px; min-width: 0; line-height: 1.15; text-align: center; word-break: keep-all; }
 .navbar button img { width: 26px; height: 26px; object-fit: contain; image-rendering: pixelated; opacity: .55; }
 .navbar button.on { color: var(--ink); font-weight: 700; background: var(--mint-pale); }
 .navbar button.on img { opacity: 1; }
 body.basic .navbar { border-top: 1px solid var(--line); }
+.navbar .nw { white-space: nowrap; }
 
 .fab { position: fixed; right: 18px; bottom: calc(var(--nav-h) + 18px); width: 58px; height: 58px; border-radius: 50%;
   background: var(--pink); color: #fff; border: 2px solid var(--ink); font-size: 30px; line-height: 1; box-shadow: 3px 3px 0 var(--ink); z-index: 20; }
@@ -750,3 +751,45 @@ body.sns .goall > li > .ic, body.sns .tagl > li > .ic { color: var(--muted); }
 body.dark .cal .nsp { color: #5FC28F; }
 .nsp-t { color: #2F7D5B; font-weight: 700; }
 body.dark .nsp-t { color: #5FC28F; }
+
+/* ── 1.8.0: 결제수단 · 외화 · 나눠 적기 · 같은 곳 · 휴지통 · 카테고리 그림 · 주별/결제수단/저축 · 고정비 · 달력 돈 일정 ── */
+.ent-more { gap: 6px; margin: -2px 0 10px; }
+.same-l { display: inline-block; margin-top: 4px; color: var(--teal-dark); text-decoration: underline; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.sns .same-l { color: var(--accent); }
+.fx-res { margin-top: 4px; }
+.fx-res b { font-size: 1.15em; }
+.trashbtn { position: relative; }
+.trashbtn .ic { width: 22px; height: 22px; }
+.trashbtn .badge { position: absolute; top: 0; right: 0; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--out); color: #fff; font-size: 10px; line-height: 16px; text-align: center; font-weight: 700; }
+.trl li input[type=checkbox] { flex: none; }
+.emogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px; }
+.emogrid button { height: 42px; font-size: 22px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 0; font-family: sans-serif; }
+.emogrid button.on { border: 2px solid var(--teal-dark); background: var(--cyan); }
+body.sns .emogrid button.on { border-color: var(--accent); }
+.emo-b { font-size: 1.1em; min-width: 30px; }
+.seg.rows { flex-wrap: wrap; }
+.seg.rows button { flex: 1 0 20%; box-sizing: border-box; border-top: 1px solid var(--ink); }
+.seg.rows button:nth-child(-n+5) { border-top: 0; }
+.seg.rows button:nth-child(5n+1) { border-left: 0; }
+body.basic .seg.rows button, body.sns .seg.rows button { border-top-color: var(--line); }
+body.sns .seg.rows { border-radius: 14px; }
+.sp-m { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.sp-m .nm { width: 2.6em; flex: none; font-size: .85em; }
+.sp-m .pbar { flex: 1; }
+.sp-m .v { flex: none; min-width: 7.5em; text-align: right; }
+.fixed { line-height: 1.7; }
+.fixedbox { margin-bottom: 10px; }
+.wkl .pbar, .payst .pbar, .perfl .pbar, .savl .pbar { margin: 4px 0 2px; }
+.bcard .bc-wk { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.wdays { display: flex; gap: 4px; align-items: flex-end; height: 34px; margin-top: 4px; }
+.wdays .d { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; font-size: .62em; color: var(--muted); }
+.wdays .d i { display: block; width: 70%; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--grid); }
+.wdays .d.has i { background: var(--teal); }
+body.sns .wdays .d.has i { background: var(--accent); }
+.wdays .d.today { color: var(--out); font-weight: 700; }
+.wdays .d.today i { outline: 1px solid var(--out); }
+.cal .mv { font-size: .56em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--out); }
+.cal .mv.in { color: var(--in); }
+.cal .mv.done { color: var(--muted); text-decoration: line-through; opacity: .8; }
+.mlist li .ic { width: 18px; height: 18px; flex: none; }
+.mlist .done { opacity: .6; }

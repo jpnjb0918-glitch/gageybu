@@ -11,6 +11,19 @@ const Extra = (() => {
   // ── 예산 알림 (저장 전·후 비교) ──
   const spentBefore = (lid, code, d) => { try { return code ? Ins.codeSpent(lid, code, d, sd()) : 0; } catch (_) { return 0; } };
   const alertAfter = (lid, code, d, before) => { try { return Ins.budgetAlert(lid, code, d, before, sd()); } catch (_) { return null; } };
+  // 한 달 전체 예산 알림 (1.8.0)
+  const monthBefore = (lid, d) => { try { return TBud.monthSpent(lid, d, sd()); } catch (_) { return 0; } };
+  const totalAlertAfter = (lid, d, before) => { try { return TBud.alert(lid, d, before, sd()); } catch (_) { return null; } };
+  /** 이번 주 (주간 예산을 정했고, 보고 있는 달에 오늘이 들어 있을 때). 아니면 '' */
+  function weekHtml(lid, start, end, today) {
+    if (!Week.budget(lid) || !(start <= today && today <= end)) return '';
+    const w = Week.progress(lid, today, today);
+    const over = w.left < 0;
+    const top = Math.max(1, ...w.days.map(d => d.spent));
+    return `<div class="bc-wk"><div class="small">이번 주 (${U.dotMD(w.start)}~${U.dotMD(w.end)}) <b>${UI.money(w.spent)}</b> / ${UI.money(w.budget)}원
+      <span class="${over ? 'out' : 'muted'}">${over ? `(${UI.money(-w.left)}원 넘음)` : `(남은 돈 ${UI.money(w.left)} · 하루 ${UI.money(w.per_day)})`}</span></div>${bar(w.pct)}
+      <div class="wdays">${w.days.map((d, i) => `<div class="d${d.spent > 0 ? ' has' : ''}${d.date === today ? ' today' : ''}" title="${d.date} ${UI.money(d.spent)}원"><i style="height:${d.spent > 0 ? Math.max(3, Math.round(d.spent * 22 / top)) : 2}px"></i>${U.WEEKDAYS[i]}</div>`).join('')}</div></div>`;
+  }
 
   // ── 가계부 화면의 예산 막대 (화면 구성 'budget') ──
   function budgetCard(lid, y, m) {
@@ -25,19 +38,20 @@ const Extra = (() => {
       const streak = start <= today && today <= end ? Ins.noSpendStreak(lid, today) : 0;
       ns = `<div class="bc-ns">${UI.icon('heart', 'on')}무지출 <b>${n}일</b>${streak >= 2 ? ` · 오늘까지 ${streak}일째` : streak === 1 ? ' · 오늘은 아직 안 썼어요' : ''}</div>`;
     }
-    const per = sd() !== 1 ? ` <span class="muted tiny">(${start.slice(5).replace('-', '.')}~${end.slice(5).replace('-', '.')})</span>` : '';
+    const per = sd() !== 1 ? ` <span class="muted tiny">(${U.dotMD(start)}~${U.dotMD(end)})</span>` : '';
+    const wk = weekHtml(lid, start, end, today);
     let html;
-    if (!bp.rows.length) {
+    if (!bp.rows.length && !bp.total) {
       html = `<div class="box bcard empty"><div class="bc-h"><b>${m}월 예산</b>${per}<button class="btn sm" data-bset>예산 정하기</button></div>
-        <div class="small muted">계정별 예산을 정하면 얼마나 썼는지 막대로 보여 주고, 80%·100%를 넘을 때 알려 드려요.</div>${ns}</div>`;
+        ${wk || '<div class="small muted">한 달 전체·카테고리별·주간 예산을 정하면 얼마나 썼는지 막대로 보여 주고, 80%·100%를 넘을 때 알려 드려요.</div>'}${ns}</div>`;
     } else {
       const over = bp.left < 0;
       const sub = over ? `<span class="out">예산보다 ${UI.money(-bp.left)}원 더 썼어요</span>`
         : start <= today && today <= end ? `남은 돈 ${UI.money(bp.left)}원 · 하루 ${UI.money(bp.per_day)}원씩 (${bp.days_left}일 남음)` : `남은 돈 ${UI.money(bp.left)}원`;
-      html = `<div class="box bcard tap" data-bopen><div class="bc-h"><b>${m}월 예산</b>${per}<span class="bc-t"><b>${UI.money(bp.spent)}</b> / ${UI.money(bp.budget)} <span class="${over ? 'out' : 'muted'}">(${pctText(bp.pct)})</span></span></div>
+      html = `<div class="box bcard tap" data-bopen><div class="bc-h"><b>${m}월 ${bp.total ? '전체 예산' : '예산'}</b>${per}<span class="bc-t"><b>${UI.money(bp.spent)}</b> / ${UI.money(bp.budget)} <span class="${over ? 'out' : 'muted'}">(${pctText(bp.pct)})</span></span></div>
         ${bar(bp.pct, 'big')}<div class="small muted bc-sub">${sub}</div>
         <div class="bc-rows">${bp.rows.slice(0, 3).map(r => `<div class="bc-r"><span class="nm ellipsis">${U.esc(r.name)}</span><span class="v ${r.left < 0 ? 'out' : ''}">${pctText(r.pct)}</span>${bar(r.pct)}</div>`).join('')}</div>
-        ${bp.rows.length > 3 ? `<div class="tiny muted">외 ${bp.rows.length - 3}개 · 눌러서 모두 보기</div>` : ''}${ns}</div>`;
+        ${bp.rows.length > 3 ? `<div class="tiny muted">외 ${bp.rows.length - 3}개 · 눌러서 모두 보기</div>` : ''}${wk}${ns}</div>`;
     }
     const el = UI.el(html);
     const b = UI.$('[data-bset]', el);
@@ -47,7 +61,8 @@ const Extra = (() => {
   }
   function budgetDetail(lid, y, m) {
     const bp = Ins.budgetProgress(lid, y, m, sd(), U.today());
-    const body = `<div class="small muted" style="margin-bottom:6px">${bp.start} ~ ${bp.end} · ${UI.money(bp.spent)} / ${UI.money(bp.budget)}원 (${pctText(bp.pct)})</div>
+    const body = `<div class="small muted" style="margin-bottom:6px">${bp.start} ~ ${bp.end} · ${bp.total ? '전체 예산 ' : ''}${UI.money(bp.spent)} / ${UI.money(bp.budget)}원 (${pctText(bp.pct)})</div>
+      ${weekHtml(lid, bp.start, bp.end, U.today())}${bp.total && !bp.rows.length ? '<div class="small muted">카테고리별 예산은 정하지 않았어요.</div>' : ''}
       <ul class="list blist">${bp.rows.map(r => `<li><div class="grow"><div class="main-t">${U.esc(r.name)} <span class="small ${r.left < 0 ? 'out' : 'muted'}">${UI.money(r.spent)} / ${UI.money(r.budget)}</span></div>${bar(r.pct)}</div>
         <div class="right nowrap"><b class="${r.left < 0 ? 'out' : ''}">${pctText(r.pct)}</b><div class="tiny muted">${r.left < 0 ? `${UI.money(-r.left)} 넘음` : `남음 ${UI.money(r.left)}`}</div></div></li>`).join('')}</ul>`;
     UI.sheet({ title: `${y}년 ${m}월 예산`, body, full: true, buttons: [
@@ -62,7 +77,13 @@ const Extra = (() => {
     const cur = Rep.budgets(lid, U.ym(y, m)), prevBud = Rep.budgets(lid, U.ym(py, pm));
     const cats = L.categories(lid).filter(c => !U.isIncomeCode(c.code));
     const spans = [[1, `${m}월만`]].concat(m < 12 ? [[13 - m, `${m}월부터 12월까지 같게`]] : []).concat([[12, `${m}월부터 12달 동안 같게`]]);
-    const body = UI.el(`<div><div class="small muted" style="margin-bottom:6px">쓰지 않을 계정은 비워 두세요. 금액 옆 계산기로 300000/4 처럼 계산도 됩니다.</div>
+    const tm = TBud.get(lid, U.ym(y, m)), wb = Week.budget(lid);
+    const body = UI.el(`<div><div class="form"><div class="f"><label class="l">한 달 전체 예산 <span class="tiny muted">카테고리를 나누지 않고 한 달에 쓸 돈 (비우면 안 씀)</span></label>
+        <input type="text" inputmode="numeric" class="money" data-t="month" value="${tm ? UI.money(tm) : ''}" placeholder="0"></div>
+      <div class="f"><label class="l">주간 예산 (매주) <span class="tiny muted">월~일 한 주에 쓸 돈 (비우면 안 씀)</span></label>
+        <input type="text" inputmode="numeric" class="money" data-t="week" value="${wb ? UI.money(wb) : ''}" placeholder="0"></div></div>
+      <div class="section-t">카테고리별 예산</div>
+      <div class="small muted" style="margin-bottom:6px">쓰지 않을 카테고리는 비워 두세요. 금액 옆 계산기로 300000/4 처럼 계산도 됩니다.</div>
       <div class="form bset">${cats.map(c => `<div class="f bs-r"><label class="l">${U.esc(c.code)} ${U.esc(c.name)} <span class="tiny muted">지난달 ${UI.money(prev[c.code] || 0)}</span></label>
         <input type="text" inputmode="numeric" class="money" data-c="${U.esc(c.code)}" value="${cur[c.code] ? UI.money(cur[c.code]) : ''}" placeholder="0"></div>`).join('')}</div>
       <div class="row" style="margin:4px 0 8px"><button class="btn sm" data-prev>지난달 예산 가져오기</button><b class="grow right bs-sum"></b></div>
@@ -79,13 +100,18 @@ const Extra = (() => {
     sum();
     UI.sheet({ title: `${y}년 ${m}월 예산 정하기`, body, full: true, buttons: [{ label: '취소' }, { label: '저장', cls: 'pri', onClick: () => {
       const vals = {};
-      try { UI.$$('[data-c]', body).forEach(x => { vals[x.dataset.c] = U.calcMoney(x.value); }); } catch (_) { UI.toast('금액은 숫자(또는 계산식)로 입력하세요.'); return false; }
-      if (Object.values(vals).some(v => v < 0)) { UI.toast('예산은 0 이상으로 입력하세요.'); return false; }
+      let mt, wt;
+      try {
+        UI.$$('[data-c]', body).forEach(x => { vals[x.dataset.c] = U.calcMoney(x.value); });
+        mt = U.calcMoney(UI.$('[data-t=month]', body).value);
+        wt = U.calcMoney(UI.$('[data-t=week]', body).value);
+      } catch (_) { UI.toast('금액은 숫자(또는 계산식)로 입력하세요.'); return false; }
+      if (Object.values(vals).some(v => v < 0) || mt < 0 || wt < 0) { UI.toast('예산은 0 이상으로 입력하세요.'); return false; }
       const n = Number(UI.$('[data-span]', body).value);
       const yms = [];
       let yy = y, mm = m;
       for (let i = 0; i < n; i++) { yms.push(U.ym(yy, mm)); [yy, mm] = U.addMonths(yy, mm, 1); }
-      Rep.setBudgets(lid, yms, vals);
+      DB.tx(() => { Rep.setBudgets(lid, yms, vals); TBud.set(lid, yms, mt); Week.setBudget(lid, wt); });
       App.dataChanged();
       UI.toast(n > 1 ? `${n}달 예산을 저장했습니다` : '예산을 저장했습니다');
       return undefined;
@@ -105,7 +131,7 @@ const Extra = (() => {
     const dup = e => !!DB.one('SELECT 1 AS x FROM entry WHERE ledger_id=? AND date=? AND item=? AND income=? AND expense=? LIMIT 1', [lid, e.date, e.item, e.income, e.expense]);
     function read() {
       found = Sms.parse(ta.value, U.today()).map(p => {
-        const e = Sms.toEntry(p);
+        const e = Sms.toEntry(p, true);
         const isDup = p.ok && dup(e);
         return { p, e, dup: isDup, on: p.ok && !isDup, code: Sms.guessCode(lid, p.item, p.kind === 'in') };
       });
@@ -118,7 +144,8 @@ const Extra = (() => {
           <span class="${x.p.kind === 'in' ? 'in' : 'out'} bold">${x.p.kind === 'in' ? '입금' : x.p.kind === 'cancel' ? '승인 취소' : '지출'}</span>
           <span class="tiny muted">${U.esc(x.e.memo)}${x.dup ? ' · 이미 있음' : x.p.ok ? '' : ' · 확인 필요'}</span></label>
           <div class="row"><input class="inp" type="date" data-f="date" value="${U.esc(x.e.date)}"><input class="inp money grow" type="text" inputmode="numeric" data-f="amt" value="${amt ? UI.money(amt) : ''}" placeholder="금액"></div>
-          <div class="row"><input class="inp grow" type="text" data-f="item" value="${U.esc(x.e.item)}" placeholder="품목"><select class="inp" data-f="code">${UI.codeOptions(lid, x.code, x.p.kind === 'in' ? 'in' : 'out')}</select></div></div>`;
+          <div class="row"><input class="inp grow" type="text" data-f="item" value="${U.esc(x.e.item)}" placeholder="내용"><select class="inp" data-f="code">${UI.codeOptions(lid, x.code, x.p.kind === 'in' ? 'in' : 'out')}</select></div>
+          <div class="row"><span class="small muted">결제수단</span><select class="inp grow" data-f="pay">${Money.payOptions(x.e.pay)}</select></div></div>`;
       }).join('');
       UI.bindMoney(list);
       UI.on(list, '[data-on]', 'change', (e, cb) => cb.closest('.sms-c').classList.toggle('off', !cb.checked));
@@ -143,20 +170,19 @@ const Extra = (() => {
         let amt;
         try { amt = U.calcMoney(g('amt')); } catch (_) { UI.toast(`${n}번째: 금액은 숫자로 입력하세요`); return false; }
         if (!U.isValidIso(g('date'))) { UI.toast(`${n}번째: 날짜를 확인하세요`); return false; }
-        if (!g('item')) { UI.toast(`${n}번째: 품목을 입력하세요`); return false; }
+        if (!g('item')) { UI.toast(`${n}번째: 내용을 입력하세요`); return false; }
         if (!amt) { UI.toast(`${n}번째: 금액을 입력하세요`); return false; }
-        if (!g('code')) { UI.toast(`${n}번째: 계정과목을 고르세요`); return false; }
+        if (!g('code')) { UI.toast(`${n}번째: 카테고리를 고르세요`); return false; }
         const inc = x.p.kind === 'in';
         const sign = x.p.kind === 'cancel' ? -Math.abs(amt) : amt;
-        vals.push({ date: g('date'), item: g('item'), income: inc ? amt : 0, expense: inc ? 0 : sign, code: g('code'), memo: x.e.memo });
+        vals.push({ date: g('date'), item: g('item'), income: inc ? amt : 0, expense: inc ? 0 : sign, code: g('code'), memo: x.e.memo, pay: UI.$('[data-f=pay]', c).value });
       }
       const alerts = [];
       DB.tx(() => {
         for (const v of vals) {
-          const before = spentBefore(lid, v.code, v.date);
+          const before = spentBefore(lid, v.code, v.date), beforeM = monthBefore(lid, v.date);
           L.addEntry(lid, v);
-          const a = alertAfter(lid, v.code, v.date, before);
-          if (a && !alerts.includes(a)) alerts.push(a);
+          for (const a of [alertAfter(lid, v.code, v.date, before), totalAlertAfter(lid, v.date, beforeM)]) if (a && !alerts.includes(a)) alerts.push(a);
         }
       });
       App.dataChanged();
@@ -175,7 +201,7 @@ const Extra = (() => {
     function draw() {
       const cmap = L.categoryMap(lid), fs = L.favorites(lid);
       ul.innerHTML = fs.length ? fs.map((f, i) => `<li data-id="${f.id}"><div class="grow"><div class="main-t ellipsis">★ ${U.esc(f.item)}</div>
-        <div class="sub ellipsis">${[f.code ? L.codeLabel(cmap, f.code) : '', f.memo].filter(Boolean).map(U.esc).join(' · ')}</div></div>
+        <div class="sub ellipsis">${[f.code ? Money.cat(cmap, f.code) : '', Money.payLabel(f.pay), f.memo].filter(Boolean).map(U.esc).join(' · ')}</div></div>
         <div class="nowrap ${f.income ? 'in' : 'out'} bold">${f.income ? '+' + UI.money(f.income) : f.expense ? UI.money(f.expense) : ''}</div>
         <button class="iconbtn" data-mv="-1" aria-label="위로"${i ? '' : ' disabled'}>▲</button><button class="iconbtn" data-mv="1" aria-label="아래로"${i < fs.length - 1 ? '' : ' disabled'}>▼</button>
         <button class="iconbtn" data-del aria-label="지우기">✕</button></li>`).join('') : `<li class="muted">아직 없어요</li>`;
@@ -245,14 +271,14 @@ const Extra = (() => {
   function insightHtml(lid, y, m) {
     const i = Ins.monthInsight(lid, y, m, sd(), U.today());
     const word = (p, more = '많이', less = '적게') => (p === null ? '' : p === 0 ? '똑같이' : `<b class="${p > 0 ? 'out' : 'in'}">${Math.abs(p)}% ${p > 0 ? more : less}</b>`);
-    const per = `${i.start.replace(/-/g, '.')} ~ ${i.end.slice(5).replace('-', '.')}${sd() !== 1 ? ` · 결산일 ${sd()}일 기준` : ''}`;
+    const per = `${i.start.replace(/-/g, '.')} ~ ${U.dotMD(i.end)}${sd() !== 1 ? ` · 월 시작일 ${sd()}일 기준` : ''}`;
     if (!i.days) return `<div class="ins"><div class="small muted">${per}</div><div class="empty small">아직 시작하지 않은 달입니다.</div></div>`;
     const li = [];
     if (i.prev_same) li.push(`${i.current ? '지난달 같은 기간' : '지난달'}(${UI.money(i.prev_same)}원)보다 ${word(i.change_pct)} 썼어요`);
     else if (i.expense) li.push('지난달 같은 기간에는 쓴 돈이 없어요');
     li.push(`하루 평균 ${UI.money(i.daily_avg)}원`);
     if (i.current && i.days < i.total_days) li.push(`이대로 쓰면 이달 지출은 약 <b>${UI.money(i.projected)}원</b>${i.prev_full ? ` (지난달 전체 ${UI.money(i.prev_full)}원)` : ''}`);
-    if (i.biggest) li.push(`가장 큰 지출: ${U.esc(i.biggest.item)} ${UI.money(i.biggest.amount)}원 (${i.biggest.date.slice(5).replace('-', '.')})`);
+    if (i.biggest) li.push(`가장 큰 지출: ${U.esc(i.biggest.item)} ${UI.money(i.biggest.amount)}원 (${U.dotMD(i.biggest.date)})`);
     li.push(`무지출 ${i.no_spend}일${i.current && i.streak >= 1 ? ` · 오늘까지 ${i.streak}일 이어지는 중` : ''}`);
     let h = `<div class="ins"><div class="small muted">${per}</div>
       <div class="ins-big">${i.current ? `오늘까지 <b>${i.days}일</b> 동안` : '한 달 동안'} <b class="out">${UI.money(i.expense)}원</b> 썼어요 <span class="small muted">(수입 ${UI.money(i.income)}원)</span></div>
@@ -261,9 +287,11 @@ const Extra = (() => {
       h += `<div class="section-t">많이 쓴 곳</div><ul class="list">${i.top.map((t, n) => `<li><span class="chip">${n + 1}</span><div class="grow"><div class="main-t">${U.esc(t.name)}</div>
         <div class="sub">${t.prev ? `지난달(${UI.money(t.prev)}원)보다 ${word(t.change_pct)}` : '지난달엔 없음'}</div></div><b class="out nowrap">${UI.money(t.amount)}원</b></li>`).join('')}</ul>`;
     }
+    h += `<div class="section-t">고정 수입·지출</div>${Money.fixedHtml(lid, y, m)}`;
+    h += Money.perfHtml(y, m);
     const bp = i.budget;
-    if (bp.rows.length) {
-      h += `<div class="section-t">예산 <span class="small muted">${UI.money(bp.spent)} / ${UI.money(bp.budget)} (${pctText(bp.pct)})</span></div>${bar(bp.pct, 'big')}
+    if (bp.rows.length || bp.total) {
+      h += `<div class="section-t">예산 <span class="small muted">${bp.total ? '전체 예산 ' : ''}${UI.money(bp.spent)} / ${UI.money(bp.budget)} (${pctText(bp.pct)})</span></div>${bar(bp.pct, 'big')}
         <ul class="list blist">${bp.rows.map(r => `<li><div class="grow"><div class="main-t">${U.esc(r.name)} <span class="small muted">${UI.money(r.spent)} / ${UI.money(r.budget)}</span></div>${bar(r.pct)}</div><b class="${r.left < 0 ? 'out' : ''}">${pctText(r.pct)}</b></li>`).join('')}</ul>`;
     }
     return h + '</div>';
@@ -272,25 +300,23 @@ const Extra = (() => {
   // ── 결산: 태그 ──
   function tagsView(c, lid, s, rerender) {
     const range = s.tagAll ? [null, null] : [U.iso(s.y, s.m, 1), U.iso(s.y, s.m, U.monthEnd(s.y, s.m))];
-    const top = UI.el(`<div class="row" style="margin-bottom:6px"><span class="chip ${s.tagAll ? 'on' : ''}" data-all>전체 기간</span><span class="small muted grow">품목이나 메모에 #여행 #회사 처럼 쓰면 계정과 따로 모아 봅니다.</span></div>`);
+    const top = UI.el(`<div class="row" style="margin-bottom:6px"><span class="chip ${s.tagAll ? 'on' : ''}" data-all>전체 기간</span><span class="small muted grow">내용이나 메모에 #여행 #회사 처럼 쓰면 카테고리와 따로 모아 봅니다.</span></div>`);
     UI.$('[data-all]', top).onclick = () => { s.tagAll = !s.tagAll; rerender(); };
     c.appendChild(top);
     if (!s.tagAll) c.appendChild(UI.monthNav(s.y, s.m, (y, m) => { s.y = y; s.m = m; rerender(); }));
     const rows = L.tagSummary(lid, range[0], range[1]);
-    if (!rows.length) { c.appendChild(UI.el(UI.empty('아직 태그를 쓴 내역이 없어요.\n품목이나 메모에 #여행 처럼 써 보세요.', 'b30'))); return; }
+    if (!rows.length) { c.appendChild(UI.el(UI.empty('아직 태그를 쓴 내역이 없어요.\n내용이나 메모에 #여행 처럼 써 보세요.', 'b30'))); return; }
     c.appendChild(UI.el(`<ul class="list tagl">${rows.map(r => `<li class="tap" data-tag="${U.esc(r.tag)}">${UI.icon('tag')}<div class="grow"><div class="main-t">#${U.esc(r.tag)}</div><div class="sub">${r.count}건</div></div>
       <div class="right nowrap">${r.expense ? `<div class="out bold">${UI.money(r.expense)}</div>` : ''}${r.income ? `<div class="in small">+${UI.money(r.income)}</div>` : ''}</div></li>`).join('')}</ul>`));
     UI.on(c, '[data-tag]', 'click', (e, li) => {
-      const tag = li.dataset.tag, cmap = L.categoryMap(lid);
+      const tag = li.dataset.tag;
       const list = L.entriesWithTag(lid, tag, range[0], range[1]);
-      const sh = UI.sheet({ title: `#${tag} (${list.length}건)`, full: true,
-        body: `<ul class="list">${list.map(x => Entry.rowHtml(x, null, true, cmap)).join('')}</ul>` });
-      UI.on(sh.body, 'li[data-id]', 'click', (ev, row) => { sh.close(); Entry.open({ entry: list.find(x => x.id === Number(row.dataset.id)) }); });
+      Entry.listSheet(`#${tag} (${list.length}건)`, list);
     });
   }
 
   return { budgetCard, budgetSheet, budgetDetail, smsSheet, looksSms, favoritesSheet, favLabel, photoField, transferSheet, insightHtml, tagsView,
-    spentBefore, alertAfter, bar, pctText };
+    spentBefore, alertAfter, monthBefore, totalAlertAfter, bar, pctText };
 })();
 
 // ════════ 저축 목표 ════════
@@ -357,7 +383,7 @@ Pages.debts = (() => {
   function render(c) {
     const [lend, borrow] = Goal.debtTotals();
     c.appendChild(UI.el(`<div class="box"><div class="kv"><span>받을 돈 (빌려준 돈)</span><b class="in">${UI.money(lend)}원</b></div>
-      <div class="kv"><span>갚을 돈 (빌린 돈)</span><b class="out">${UI.money(borrow)}원</b></div><div class="tiny muted">자산관리의 자산 합계·부채 합계에 들어갑니다.</div></div>`));
+      <div class="kv"><span>갚을 돈 (빌린 돈)</span><b class="out">${UI.money(borrow)}원</b></div><div class="tiny muted">자산 화면의 자산 합계·부채 합계에 들어갑니다.</div></div>`));
     const opt = UI.el(`<div class="row" style="margin-bottom:6px"><span class="chip ${s.done ? 'on' : ''}" data-done>끝난 것도 보기</span></div>`);
     UI.$('[data-done]', opt).onclick = () => { s.done = !s.done; App.render(true); };
     c.appendChild(opt);

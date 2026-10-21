@@ -1,9 +1,8 @@
 """이달 살펴보기 (1.7.0): 예산 진행·예산 알림·이달 소비 리포트·무지출 날.
 결산일(예: 25일)을 따르는 '그 달' 기간 기준. 안드로이드판 svc-extra.js 의 Ins 와 같은 계산 (devtools/compat 로 비교)."""
 import datetime as dt
-import math
 
-from ..util import add_months, fmt_money, is_income_code, iso, settle_period, to_date
+from ..util import add_months, fmt_money, is_income_code, iso, pct, settle_period, to_date
 from . import ledger as L
 from . import reports as RP
 
@@ -15,10 +14,6 @@ def period_of(d, settle_day=1):
     return (d.year, d.month) if d >= start else add_months(d.year, d.month, -1)
 
 
-def _pct(a, b):
-    """a/b 를 % 로 (0.5 는 올림). b<=0 이면 None"""
-    return math.floor(a * 100 / b + 0.5) if b > 0 else None
-
 
 def _spent_by_code(con, lid, start, end):
     """지출 계정별 쓴 돈 (지출 - 그 계정 환불)"""
@@ -28,7 +23,8 @@ def _spent_by_code(con, lid, start, end):
 # ── 예산 진행 ───────────────────────────────────────────
 def budget_progress(con, lid, y, m, settle_day=1, today=None):
     """{'rows': [{'code','name','budget','spent','left','pct'}] (많이 쓴 비율 순), 'budget','spent','left','pct',
-        'days_left','per_day'} — 지출 계정 예산만. 예산이 없으면 rows 가 빈 목록"""
+        'days_left','per_day','total'} — 지출 카테고리 예산만. 예산이 없으면 rows 가 빈 목록.
+        한 달 전체 예산(1.8.0)이 있으면 total=True 이고 budget = 전체 예산, spent = 그 달 지출 전체"""
     today = to_date(today or dt.date.today())
     start, end = settle_period(y, m, settle_day)
     bud = {c: v for c, v in RP.budgets(con, lid, f'{y:04d}-{m:02d}').items() if not is_income_code(c) and v > 0}
@@ -38,13 +34,18 @@ def budget_progress(con, lid, y, m, settle_day=1, today=None):
     for code, b in bud.items():
         s = spent.get(code, 0)
         rows.append({'code': code, 'name': L.code_label(cmap, code), 'budget': b, 'spent': s, 'left': b - s,
-                     'pct': _pct(s, b)})
+                     'pct': pct(s, b)})
     rows.sort(key=lambda r: (-r['pct'], -r['spent'], r['code']))
     tb, ts = sum(bud.values()), sum(r['spent'] for r in rows)
+    from .money import total_budget                # 한 달 전체 예산이 있으면 막대는 지출 전체 / 전체 예산 (1.8.0)
+    tot = total_budget(con, lid, f'{y:04d}-{m:02d}')
+    if tot > 0:
+        tb, ts = tot, RP._income_expense(con, lid, start, end)[1]
     days_left = (end - today).days + 1 if start <= today <= end else (0 if today > end else (end - start).days + 1)
     left = tb - ts
-    return {'rows': rows, 'budget': tb, 'spent': ts, 'left': left, 'pct': _pct(ts, tb), 'days_left': days_left,
-            'per_day': left // days_left if days_left > 0 and left > 0 else 0, 'start': iso(start), 'end': iso(end)}
+    return {'rows': rows, 'budget': tb, 'spent': ts, 'left': left, 'pct': pct(ts, tb), 'days_left': days_left,
+            'per_day': left // days_left if days_left > 0 and left > 0 else 0, 'start': iso(start), 'end': iso(end),
+            'total': tot > 0}
 
 
 def code_spent(con, lid, code, d, settle_day=1):
@@ -67,7 +68,7 @@ def budget_alert(con, lid, code, d, before, settle_day=1):
     if before < b <= after:
         return f'{m}월 {name} 예산을 넘었어요: {fmt_money(after)}원 / {fmt_money(b)}원 ({fmt_money(after - b)}원 초과)'
     if before * 100 < b * 80 <= after * 100:
-        return f'{m}월 {name} 예산의 {_pct(after, b)}%를 썼어요 (남은 돈 {fmt_money(b - after)}원)'
+        return f'{m}월 {name} 예산의 {pct(after, b)}%를 썼어요 (남은 돈 {fmt_money(b - after)}원)'
     return None
 
 
@@ -128,10 +129,10 @@ def month_insight(con, lid, y, m, settle_day=1, today=None):
     return {
         'start': iso(start), 'end': iso(end), 'upto': iso(upto) if days else '', 'current': current,
         'days': days, 'total_days': total_days, 'income': inc, 'expense': exp,
-        'prev_same': prev_same, 'prev_full': prev_full, 'change_pct': _pct(exp - prev_same, prev_same),
+        'prev_same': prev_same, 'prev_full': prev_full, 'change_pct': pct(exp - prev_same, prev_same),
         'daily_avg': avg, 'projected': avg * total_days if current else exp,
         'top': [{'code': c, 'name': L.code_label(cmap, c), 'amount': v, 'prev': prev.get(c, 0),
-                 'change_pct': _pct(v - prev.get(c, 0), prev.get(c, 0))} for c, v in top],
+                 'change_pct': pct(v - prev.get(c, 0), prev.get(c, 0))} for c, v in top],
         'biggest': {'item': big['item'], 'amount': big['expense'], 'date': big['date']} if big else None,
         'no_spend': len(ns), 'streak': no_spend_streak(con, lid, ns_end) if days and ns_end >= start else 0,
         'budget': budget_progress(con, lid, y, m, settle_day, today),

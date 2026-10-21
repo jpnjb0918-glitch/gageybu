@@ -18,20 +18,24 @@ def add_ledger(con, name, copy_from=None, codes_only=False):
         con.execute('INSERT INTO cat_group SELECT ?, code, name FROM cat_group WHERE ledger_id=?', (lid, copy_from))
         con.execute('INSERT INTO category SELECT ?, code, name, sort FROM category WHERE ledger_id=?', (lid, copy_from))
         if not codes_only:
-            con.execute('INSERT INTO entry(ledger_id,date,item,income,expense,code,memo,origin) '
-                        'SELECT ?,date,item,income,expense,code,memo,origin FROM entry WHERE ledger_id=? ORDER BY date,id',
+            con.execute('INSERT INTO entry(ledger_id,date,item,income,expense,code,memo,origin,pay) '
+                        'SELECT ?,date,item,income,expense,code,memo,origin,pay FROM entry WHERE ledger_id=? ORDER BY date,id',
                         (lid, copy_from))
             con.execute('INSERT INTO budget SELECT ?, ym, code, amount FROM budget WHERE ledger_id=?', (lid, copy_from))
             con.execute('INSERT INTO item_word SELECT ?, name, count FROM item_word WHERE ledger_id=?', (lid, copy_from))
-            con.execute('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort) '
-                        'SELECT ?,item,income,expense,code,memo,sort FROM favorite WHERE ledger_id=?', (lid, copy_from))
+            con.execute('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort,pay) '
+                        'SELECT ?,item,income,expense,code,memo,sort,pay FROM favorite WHERE ledger_id=?', (lid, copy_from))
             from .recurring import processed_through
             for r in con.execute('SELECT * FROM recurring WHERE ledger_id=?', (copy_from,)).fetchall():
                 thr = processed_through(con, r['id'])
                 con.execute('INSERT INTO recurring(ledger_id,item,income,expense,code,day,start,end,memo,created,'
-                            'applied_through) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                            'applied_through,pay,cycle,every,wday,ymonth,end2) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                             (lid, r['item'], r['income'], r['expense'], r['code'], r['day'], r['start'], r['end'],
-                             r['memo'], r['created'], iso(thr) if thr else None))
+                             r['memo'], r['created'], iso(thr) if thr else None, r['pay'], r['cycle'], r['every'],
+                             r['wday'], r['ymonth'], r['end2']))
+        emo = db.get_meta(con, f'cat_emoji:{copy_from}')        # 카테고리 그림 (1.8.0)
+        if emo:
+            db.set_meta(con, f'cat_emoji:{lid}', emo)
     else:
         con.execute("INSERT INTO cat_group VALUES(?, '0', '수입')", (lid,))
     con.commit()
@@ -70,7 +74,7 @@ def first_ledger_id(con):
 
 def delete_ledger(con, lid):
     if lid == first_ledger_id(con):
-        raise ValueError('첫 번째 장부는 삭제할 수 없습니다 (이름 변경은 가능).')
+        raise ValueError('첫 번째 가계부는 삭제할 수 없습니다 (이름은 바꿀 수 있습니다).')
     con.execute('DELETE FROM ledger WHERE id=?', (lid,))
     con.commit()
 
@@ -127,10 +131,19 @@ def set_group(con, lid, code, name):
 
 
 def delete_group(con, lid, code):
+    """카테고리(대분류) 삭제. 안의 세부 카테고리가 아무 데도 안 쓰였으면 함께 지움 (1.8.0).
+    내역·고정 수입·지출·예산에 쓰인 세부 카테고리가 있으면 지우지 않음 — 먼저 옮기거나 지워야 함"""
     if code == '0':
-        raise ValueError('0번(수입) 대분류는 삭제할 수 없습니다.')
-    if categories(con, lid, code):
-        raise ValueError('소분류가 남아 있으면 대분류를 삭제할 수 없습니다.')
+        raise ValueError('수입 카테고리(0번)는 삭제할 수 없습니다.')
+    cats = categories(con, lid, code)
+    used = [c for c in cats if any(category_usage(con, lid, c['code']).values())]
+    if used:
+        names = ', '.join(c['name'] for c in used[:3]) + (' 등' if len(used) > 3 else '')
+        raise ValueError(f'내역이 있는 세부 카테고리({names})가 있어 삭제할 수 없습니다.\n'
+                         '그 세부 카테고리를 먼저 다른 카테고리로 옮기거나 지우세요.')
+    for c in cats:
+        con.execute('DELETE FROM category WHERE ledger_id=? AND code=?', (lid, c['code']))
+        con.execute("UPDATE favorite SET code='' WHERE ledger_id=? AND code=?", (lid, c['code']))
     con.execute('DELETE FROM cat_group WHERE ledger_id=? AND code=?', (lid, code))
     con.commit()
 
@@ -166,9 +179,10 @@ def merge_category(con, lid, src, dst):
     if src == dst:
         return
     if not con.execute('SELECT 1 FROM category WHERE ledger_id=? AND code=?', (lid, dst)).fetchone():
-        raise ValueError(f'계정코드 {dst} 가 없습니다.')
+        raise ValueError(f'카테고리 번호 {dst} 가 없습니다.')
     con.execute('UPDATE entry SET code=? WHERE ledger_id=? AND code=?', (dst, lid, src))
     con.execute('UPDATE recurring SET code=? WHERE ledger_id=? AND code=?', (dst, lid, src))
+    con.execute('UPDATE favorite SET code=? WHERE ledger_id=? AND code=?', (dst, lid, src))
     for r in con.execute('SELECT ym, amount FROM budget WHERE ledger_id=? AND code=?', (lid, src)).fetchall():
         con.execute('INSERT INTO budget VALUES(?,?,?,?) ON CONFLICT(ledger_id,ym,code) '
                     'DO UPDATE SET amount=amount+excluded.amount', (lid, r['ym'], dst, r['amount']))
@@ -183,9 +197,13 @@ def category_usage(con, lid, code):
 
 
 def delete_category(con, lid, code):
-    """원본과 같이 그 계정의 내역·예약·예산도 함께 삭제."""
+    """원본과 같이 그 세부 카테고리의 내역·고정 수입·지출·예산도 함께 삭제 (자주 쓰는 내역은 카테고리만 비움).
+    지운 내역은 휴지통으로 (1.8.0). 내역을 남기려면 merge_category(다른 카테고리로 옮기고 삭제)"""
+    from . import trash as TR
+    TR.put(con, [r['id'] for r in con.execute('SELECT id FROM entry WHERE ledger_id=? AND code=?', (lid, code))], 'category')
     for t in ('entry', 'recurring', 'budget', 'category'):
         con.execute(f'DELETE FROM {t} WHERE ledger_id=? AND code=?', (lid, code))
+    con.execute("UPDATE favorite SET code='' WHERE ledger_id=? AND code=?", (lid, code))
     con.commit()
 
 
@@ -196,9 +214,10 @@ def _norm(e):
 
 
 def add_entry(con, lid, e, origin=None, commit=True):
+    """e: date·item·income·expense·code·memo·pay(결제수단, 1.8.0)"""
     d, item, inc, exp, code, memo = _norm(e)
-    eid = con.execute('INSERT INTO entry(ledger_id,date,item,income,expense,code,memo,origin) VALUES(?,?,?,?,?,?,?,?)',
-                      (lid, d, item, inc, exp, code, memo, origin)).lastrowid
+    eid = con.execute('INSERT INTO entry(ledger_id,date,item,income,expense,code,memo,origin,pay) VALUES(?,?,?,?,?,?,?,?,?)',
+                      (lid, d, item, inc, exp, code, memo, origin, (e.get('pay') or '').strip())).lastrowid
     if item:
         con.execute('INSERT INTO item_word VALUES(?,?,1) ON CONFLICT(ledger_id,name) DO UPDATE SET count=count+1',
                     (lid, item))
@@ -208,13 +227,20 @@ def add_entry(con, lid, e, origin=None, commit=True):
 
 
 def update_entry(con, eid, e):
+    """pay 가 없으면(예전 화면) 결제수단은 그대로 둠"""
     d, item, inc, exp, code, memo = _norm(e)
     con.execute('UPDATE entry SET date=?,item=?,income=?,expense=?,code=?,memo=? WHERE id=?',
                 (d, item, inc, exp, code, memo, eid))
+    if 'pay' in e:
+        con.execute('UPDATE entry SET pay=? WHERE id=?', ((e.get('pay') or '').strip(), eid))
     con.commit()
 
 
-def delete_entries(con, ids):
+def delete_entries(con, ids, trash=True):
+    """내역 지우기. 지운 내역은 휴지통에 30일 보관 (1.8.0, trash=False 면 바로 지움)"""
+    if trash:
+        from . import trash as TR
+        TR.put(con, ids, 'delete')
     con.executemany('DELETE FROM entry WHERE id=?', [(i,) for i in ids])
     con.commit()
 
@@ -269,8 +295,8 @@ AMOUNT_OPS = {'같은 금액': '=', '크거나 같은 금액': '>=', '작거나 
 
 
 def search(con, lid, start=None, end=None, text=None, codes=None, amount=None, amount_side='수입+지출',
-           amount_op='같은 금액', order='date', desc=False):
-    """원본 검색 조건 4가지 (AND 조건): 기간·품목 글자·계정코드(복수)·금액."""
+           amount_op='같은 금액', order='date', desc=False, pays=None):
+    """원본 검색 조건 4가지 (AND 조건): 기간·내용 글자·카테고리(복수)·금액 + 결제수단(복수, 1.8.0)."""
     q = 'SELECT * FROM entry WHERE ledger_id=?'
     a = [lid]
     if start:
@@ -286,6 +312,9 @@ def search(con, lid, start=None, end=None, text=None, codes=None, amount=None, a
     if codes:
         q += f" AND code IN ({','.join('?' * len(codes))})"
         a += list(codes)
+    if pays:
+        q += f" AND pay IN ({','.join('?' * len(pays))})"
+        a += list(pays)
     if amount is not None:
         op = AMOUNT_OPS[amount_op]
         if amount_side == '수입':
@@ -347,14 +376,14 @@ def favorites(con, lid):
 
 
 def save_favorite(con, lid, f, fid=None):
-    """f: item·income·expense·code·memo (날짜는 넣을 때 정함)"""
+    """f: item·income·expense·code·memo·pay (날짜는 넣을 때 정함)"""
     vals = ((f.get('item') or '').strip(), int(f.get('income') or 0), int(f.get('expense') or 0),
-            (f.get('code') or '').strip(), (f.get('memo') or '').strip())
+            (f.get('code') or '').strip(), (f.get('memo') or '').strip(), (f.get('pay') or '').strip())
     if fid:
-        con.execute('UPDATE favorite SET item=?,income=?,expense=?,code=?,memo=? WHERE id=?', vals + (fid,))
+        con.execute('UPDATE favorite SET item=?,income=?,expense=?,code=?,memo=?,pay=? WHERE id=?', vals + (fid,))
     else:
         sort = con.execute('SELECT COALESCE(MAX(sort),0)+1 FROM favorite WHERE ledger_id=?', (lid,)).fetchone()[0]
-        fid = con.execute('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,sort) VALUES(?,?,?,?,?,?,?)',
+        fid = con.execute('INSERT INTO favorite(ledger_id,item,income,expense,code,memo,pay,sort) VALUES(?,?,?,?,?,?,?,?)',
                           (lid,) + vals + (sort,)).lastrowid
     con.commit()
     return fid

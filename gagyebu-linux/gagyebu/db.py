@@ -136,9 +136,30 @@ CREATE TABLE IF NOT EXISTS debt_pay(
     id INTEGER PRIMARY KEY, debt_id INTEGER NOT NULL REFERENCES debt(id) ON DELETE CASCADE,
     date TEXT NOT NULL, amount INTEGER NOT NULL, memo TEXT NOT NULL DEFAULT '');
 
+-- 휴지통 (1.8.0): 지운 내역을 30일 동안 보관 — entry 는 지운 행 그대로(JSON), 사진은 trash_photo 에
+CREATE TABLE IF NOT EXISTS trash(
+    id INTEGER PRIMARY KEY, ledger_id INTEGER NOT NULL REFERENCES ledger(id) ON DELETE CASCADE,
+    deleted TEXT NOT NULL, why TEXT NOT NULL DEFAULT '', entry TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS trash_photo(
+    id INTEGER PRIMARY KEY, trash_id INTEGER NOT NULL REFERENCES trash(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT '', mime TEXT NOT NULL DEFAULT 'image/jpeg', data BLOB NOT NULL, created TEXT);
+CREATE INDEX IF NOT EXISTS trash_photo_t ON trash_photo(trash_id);
+
 -- 원본에서 의미를 확정하지 못한 표는 내용 그대로 보관 (자료 손실 방지)
 CREATE TABLE IF NOT EXISTS legacy_raw(id INTEGER PRIMARY KEY, source TEXT, tbl TEXT, data TEXT);
 """
+
+# 1.8.0 에 더한 열 (안드로이드판 db.js 의 NEW_COLUMNS 와 같은 순서)
+NEW_COLUMNS = [
+    ('entry', [('pay', "TEXT NOT NULL DEFAULT ''")]),                 # 결제수단: cash·card·bank·pay·card:<카드번호>·etc:<이름>
+    ('favorite', [('pay', "TEXT NOT NULL DEFAULT ''")]),
+    ('recurring', [('pay', "TEXT NOT NULL DEFAULT ''"),
+                   ('cycle', "TEXT NOT NULL DEFAULT 'M'"),             # M=매달 W=매주 Y=매년
+                   ('every', 'INTEGER NOT NULL DEFAULT 1'),             # 매주: 몇 주마다
+                   ('wday', 'INTEGER NOT NULL DEFAULT 0'),              # 매주: 요일 0=월 … 6=일
+                   ('ymonth', 'INTEGER NOT NULL DEFAULT 1'),            # 매년: 몇 월 (날은 day)
+                   ('end2', 'TEXT')]),                                  # 매주·매년의 진짜 종료일 (end 는 예전 판이 건너뛰게 막아 둠)
+]
 
 DEFAULT_GROUPS = [('0', '수입'), ('1', '공과금'), ('2', '교육비'), ('3', '식비'), ('4', '교통·통신비'),
                   ('5', '생활용품'), ('6', '보험'), ('7', '저축'), ('8', '기타지출')]
@@ -178,6 +199,11 @@ def connect(path, seed=True):
     cols = {r[1] for r in con.execute('PRAGMA table_info(account_tx)')}
     if 'link_id' not in cols:                      # 자산 간 이체: 짝이 되는 거래 번호 (1.7.0)
         con.execute('ALTER TABLE account_tx ADD COLUMN link_id INTEGER')
+    for table, cols_ in NEW_COLUMNS:               # 1.8.0: 예전 판은 모르는 열이라 그냥 둠 (자료를 주고받아도 됨)
+        have = {r[1] for r in con.execute(f'PRAGMA table_info({table})')}
+        for name, decl in cols_:
+            if name not in have:
+                con.execute(f'ALTER TABLE {table} ADD COLUMN {name} {decl}')
     if get_meta(con, 'schema_version') is None:
         set_meta(con, 'schema_version', SCHEMA_VERSION)
     if seed and not con.execute('SELECT 1 FROM ledger LIMIT 1').fetchone():

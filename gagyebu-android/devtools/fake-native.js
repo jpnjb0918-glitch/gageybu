@@ -166,6 +166,15 @@
       },
       widgetRefresh() { st.widget = (st.widget || 0) + 1; },
       takeLaunchAction() { const l = st.launch || ''; st.launch = null; return l; },
+      // 매일 입력 알림 (1.8.0): 건 알람·보낸 알림은 기록만 (st.reminder, st.notes)
+      setReminder(on, h, m, ask) {
+        if (on) st.prefs.remind_on = 'true'; else delete st.prefs.remind_on;
+        st.prefs.remind_time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        st.reminder = { on, h, m, ask, n: ((st.reminder && st.reminder.n) || 0) + 1 };
+        return ok({});
+      },
+      reminderStatus() { return ok({ on: st.prefs.remind_on === 'true', time: st.prefs.remind_time || '21:00', allowed: st.notifyAllowed !== false }); },
+      testReminder(cb) { (st.notes = st.notes || []).push('test'); later(cb, st.notifyAllowed === false ? { ok: false, error: '휴대폰 설정에서 이 앱의 알림이 꺼져 있어요.' } : { ok: true }); },
     };
   })();
 })();

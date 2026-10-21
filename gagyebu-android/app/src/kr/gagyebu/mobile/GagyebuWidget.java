@@ -147,7 +147,17 @@ public class GagyebuWidget extends AppWidgetProvider {
                 } finally {
                     c.close();
                 }
-                if (bud.isEmpty()) {
+                // 한 달 전체 예산 (1.8.0): meta 'budget_total:<가계부>' = {"2026-10": 금액} — 있으면 지출 전체 / 전체 예산
+                long totalBudget = 0;
+                try {
+                    String tj = one(db, "SELECT value FROM meta WHERE key=?", new String[]{"budget_total:" + L});
+                    if (tj != null) {
+                        totalBudget = Math.max(0, new org.json.JSONObject(tj).optLong(String.format(Locale.ROOT, "%04d-%02d", pm[0], pm[1]), 0));
+                    }
+                } catch (Exception ignored) {
+                    totalBudget = 0;
+                }
+                if (bud.isEmpty() && totalBudget <= 0) {
                     long bal = num(db, "SELECT COALESCE(SUM(income)-SUM(expense),0) FROM entry WHERE ledger_id=? AND date<=?", new String[]{L, today});
                     s.extra = "잔액 " + Pure.money(bal) + "원";
                     return s;
@@ -156,11 +166,16 @@ public class GagyebuWidget extends AppWidgetProvider {
                 for (long b : bud.values()) {
                     total += b;
                 }
+                if (totalBudget > 0) {
+                    total = totalBudget;
+                }
                 c = db.rawQuery("SELECT code, COALESCE(SUM(income),0), COALESCE(SUM(expense),0) FROM entry WHERE ledger_id=? AND date BETWEEN ? AND ? GROUP BY code",
                         new String[]{L, per[0], per[1]});
                 try {
                     while (c.moveToNext()) {
-                        if (bud.containsKey(c.getString(0))) {
+                        String code = c.getString(0);
+                        boolean isExp = code != null && !code.startsWith("0");
+                        if (totalBudget > 0 ? isExp : bud.containsKey(code)) {
                             spent += c.getLong(2) - c.getLong(1);
                         }
                     }
@@ -173,7 +188,7 @@ public class GagyebuWidget extends AppWidgetProvider {
                     s.extra = "예산보다 " + Pure.money(-left) + "원 더 썼어요";
                 } else {
                     long days = Math.max(1, daysBetween(today, per[1]) + 1);
-                    s.extra = "예산 남은 돈 " + Pure.money(left) + "원 · 하루 " + Pure.money(left / days) + "원";
+                    s.extra = (totalBudget > 0 ? "전체 예산 남은 돈 " : "예산 남은 돈 ") + Pure.money(left) + "원 · 하루 " + Pure.money(left / days) + "원";
                 }
             } catch (Exception e) {
                 s.today = "자료를 읽지 못했어요";

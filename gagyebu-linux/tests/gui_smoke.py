@@ -135,11 +135,16 @@ try:
     ap.refresh()
     print('OK 카드 결제', A.summary(w.con)['순자산'])
     rp = w.goto('ReportsPage')
-    for k in range(5):
+    n_rep = 0
+    for k in range(rp.tabs.count()):
         rp.tabs.setCurrentIndex(k)
         app.processEvents()
-        assert rp.tabs.currentWidget().view.table.rowCount() > 0, f'보고서 탭 {k} 비어 있음'
-    print('OK 보고서 5종')
+        tw = rp.tabs.currentWidget()
+        if hasattr(tw, 'view') and hasattr(tw.view, 'table'):     # 월별·연간·일별·기간·예산 (표 보고서)
+            assert tw.view.table.rowCount() > 0, f'보고서 탭 {rp.tabs.tabText(k)} 비어 있음'
+            n_rep += 1
+    assert n_rep == 5, n_rep
+    print('OK 보고서 5종 (+ 주별·저축·결제수단 등 열림)')
     gp = w.goto('GraphPage')
     gp.kind.setCurrentIndex(1)
     shot('92_막대그래프')

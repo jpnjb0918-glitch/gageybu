@@ -190,11 +190,16 @@ def guess_code(con, lid, item, income=False):
     return exp[0][0] if exp else ''
 
 
-def to_entry(p):
-    """후보 하나 → 내역 값 (수입·지출). 취소는 지출을 음수로 (그 달 지출에서 빠짐)"""
+def to_entry(p, con=None):
+    """후보 하나 → 내역 값 (수입·지출). 취소는 지출을 음수로 (그 달 지출에서 빠짐).
+    con 을 주면 결제수단도 짐작 (1.8.0: 은행 → 계좌이체, 자산에 넣은 카드 → 그 카드, 그 밖 → 카드)"""
     memo = ' '.join(x for x in (p['card'], f"{p['months']}개월" if p['months'] > 1 else '', p['time']) if x)
+    pay = ''
+    if con is not None:
+        from .money import guess_pay
+        pay = guess_pay(con, p['card'], p['kind'])
     if p['kind'] == 'in':
-        return {'date': p['date'], 'item': p['item'], 'income': p['amount'], 'expense': 0, 'memo': memo}
+        return {'date': p['date'], 'item': p['item'], 'income': p['amount'], 'expense': 0, 'memo': memo, 'pay': pay}
     sign = -1 if p['kind'] == 'cancel' else 1
     return {'date': p['date'], 'item': p['item'] + (' (취소)' if p['kind'] == 'cancel' else ''), 'income': 0,
-            'expense': sign * p['amount'], 'memo': memo}
+            'expense': sign * p['amount'], 'memo': memo, 'pay': pay}

@@ -184,10 +184,10 @@ def read_entries_csv(path, valid_codes):
             continue
         code = r[4].strip()
         if not r[1].strip():
-            errors.append((n, '품목이 비어 있음'))
+            errors.append((n, '내용이 비어 있음'))
             continue
         if code not in valid_codes:
-            errors.append((n, f'없는 계정코드: {code!r}'))
+            errors.append((n, f'없는 카테고리 번호: {code!r}'))
             continue
         if not inc and not exp:
             errors.append((n, '수입·지출이 모두 0'))

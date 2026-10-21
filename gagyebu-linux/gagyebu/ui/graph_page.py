@@ -7,7 +7,6 @@ from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import QCheckBox, QComboBox, QSpinBox, QVBoxLayout, QWidget
 
-from .. import db
 from .. import theme as TH
 from ..services import ledger as L
 from ..services import reports as RP
@@ -291,7 +290,7 @@ class Chart(QWidget):
 
 
 class GraphPage(QWidget):
-    title = '그래프 분석'
+    title = '그래프'
 
     def __init__(self, app):
         super().__init__()
@@ -322,7 +321,7 @@ class GraphPage(QWidget):
         self.monthly.toggled.connect(lambda *_: self.draw())
         lay = QVBoxLayout(self)
         # 고르는 칸을 두 줄로: 넓은 SNS 테마 글꼴·여백에서도 [이미지로 저장] 이 화면 밖으로 밀리지 않게
-        lay.addWidget(h('연도', self.year, '  대분류', self.group, '  소분류', self.cat, 'stretch'))
+        lay.addWidget(h('연도', self.year, '  카테고리', self.group, '  세부 카테고리', self.cat, 'stretch'))
         lay.addWidget(h(self.monthly, self.month, '  종류', self.kind, 'stretch', button('이미지로 저장', self.save_png)))
         lay.addWidget(self.chart, 1)
 
@@ -331,7 +330,7 @@ class GraphPage(QWidget):
         cur = self.group.currentData()
         self.group.blockSignals(True)
         self.group.clear()
-        self.group.addItem('전체 계정 (대분류별)', None)
+        self.group.addItem('전체 (카테고리별)', None)
         for g in L.groups(self.con, lid):
             self.group.addItem(f"{g['code']} {g['name']}", g['code'])
         self.group.setCurrentIndex(max(0, self.group.findData(cur)))
@@ -365,7 +364,7 @@ class GraphPage(QWidget):
         m = self.month.currentIndex() + 1 if self.monthly.isChecked() else None
         labels, series = RP.graph_series(self.con, self.app.lid, y, group=self.group.currentData(),
                                          code=self.cat.currentData(), month=m,
-                                         settle_day=int(db.get_meta(self.con, 'settle_day', 1) or 1))
+                                         settle_day=RP.settle_day(self.con))
         what = self.cat.currentText() if self.cat.currentData() else self.group.currentText()
         title = f"{y}년{f' {m}월' if m else ''} {what} 분석"
         self.chart.set_data(labels, series, self.kind.currentData() or 'line', title)

@@ -99,13 +99,19 @@ const U = (() => {
   const monthLabel = (y, m) => `${y}년 ${m}월`;
   const dateLabel = s => { const [y, m, d] = parts(s); return `${y}.${pad(m)}.${pad(d)} (${WEEKDAYS[weekday(s)]})`; };
   const shortDate = s => { const [, m, d] = parts(s); return `${m}/${d}`; };
+  /** '2026-10-05' → '10.05' */
+  const dotMD = s => String(s).slice(5, 10).replace('-', '.');
 
   // ── 화면 도우미 ──
   const esc = s => String(s === null || s === undefined ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const sum = arr => arr.reduce((a, b) => a + (b || 0), 0);
+  /** a/b 를 % 로 (0.5 는 올림). b<=0 이면 null — PC판 util.pct 와 같음 */
+  const pct = (a, b) => (b > 0 ? Math.floor(a * 100 / b + 0.5) : null);
+  /** 글자 비교 (파이썬 sorted 와 같은 순서) */
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
   return { INCOME_GROUP, CODE_CHARS, MONEY_LIMIT, WEEKDAYS, WEATHER, isIncomeCode, fmtMoney, parseMoney, calcMoney,
     pad, iso, parts, isValidIso, today, ord, fromOrd, addDays, weekday, monthEnd, addMonths, clampDay,
-    settlePeriod, ym, monthLabel, dateLabel, shortDate, esc, sum };
+    settlePeriod, ym, monthLabel, dateLabel, shortDate, dotMD, esc, sum, pct, cmp };
 })();
